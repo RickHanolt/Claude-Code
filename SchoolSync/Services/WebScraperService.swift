@@ -68,7 +68,8 @@ struct WebScraperService {
         guard let dateString else { return nil }
 
         let formats = config.dateFormat.map { [$0] } ?? DateParsingHelpers.commonFormats
-        guard let startDate = DateParsingHelpers.parse(dateString, formats: formats) else { return nil }
+        guard let parsedDate = DateParsingHelpers.parseDetailed(dateString, formats: formats) else { return nil }
+        let startDate = parsedDate.date
 
         let location: String?
         if let selector = config.locationSelector, let element = try container.select(selector).first() {
@@ -84,7 +85,7 @@ struct WebScraperService {
             title: title,
             startDate: startDate,
             endDate: nil,
-            isAllDay: true,
+            isAllDay: !parsedDate.hasTimeComponent,
             location: location,
             notes: nil,
             kidID: kidID,

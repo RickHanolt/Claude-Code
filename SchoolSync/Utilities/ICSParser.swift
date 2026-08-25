@@ -117,10 +117,15 @@ enum ICSParser {
     /// crossing a DST boundary in a different timezone than the device.
     private static func parseICSDate(_ value: String, params: [String: String]) -> (Date?, Bool) {
         if params["VALUE"] == "DATE" || (value.count == 8 && !value.contains("T")) {
+            // DATE values are timezone-independent calendar days. Parse in the
+            // device's local timezone (not UTC) so the resulting Date lands on
+            // local midnight of the intended day — parsing as UTC would shift
+            // the event a day earlier for any timezone west of UTC once
+            // EventKit renders it against the device's local calendar day.
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyyMMdd"
             formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = TimeZone(identifier: "UTC")
+            formatter.timeZone = .current
             return (formatter.date(from: value), true)
         }
 

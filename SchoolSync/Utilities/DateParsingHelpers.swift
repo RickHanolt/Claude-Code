@@ -19,14 +19,34 @@ enum DateParsingHelpers {
         "yyyy-MM-dd",
     ]
 
-    /// Tries each explicit format first, then falls back to `NSDataDetector`
-    /// for loosely-formatted free text (e.g. scraped page text or email
-    /// bodies where the date isn't isolated into its own element).
+    struct ParsedDate {
+        let date: Date
+        /// Whether the matched text actually specified a time of day, as
+        /// opposed to defaulting to midnight. Callers use this to decide
+        /// `SchoolEventDTO.isAllDay` — without it, a scraped "Back to School
+        /// Night at 6:30 PM" would silently lose its time and show as an
+        /// all-day event.
+        let hasTimeComponent: Bool
+    }
+
+    /// Convenience wrapper over `parseDetailed` for callers that only need
+    /// the date.
     static func parse(
         _ string: String,
         formats: [String] = commonFormats,
         timeZone: TimeZone = .current
     ) -> Date? {
+        parseDetailed(string, formats: formats, timeZone: timeZone)?.date
+    }
+
+    /// Tries each explicit format first, then falls back to `NSDataDetector`
+    /// for loosely-formatted free text (e.g. scraped page text or email
+    /// bodies where the date isn't isolated into its own element).
+    static func parseDetailed(
+        _ string: String,
+        formats: [String] = commonFormats,
+        timeZone: TimeZone = .current
+    ) -> ParsedDate? {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
@@ -36,7 +56,8 @@ enum DateParsingHelpers {
             formatter.timeZone = timeZone
             formatter.locale = Locale(identifier: "en_US_POSIX")
             if let date = formatter.date(from: trimmed) {
-                return date
+                let hasTime = format.contains("H") || format.contains("h")
+                return ParsedDate(date: date, hasTimeComponent: hasTime)
             }
         }
 
@@ -44,9 +65,14 @@ enum DateParsingHelpers {
             return nil
         }
         let range = NSRange(trimmed.startIndex..., in: trimmed)
-        if let match = detector.firstMatch(in: trimmed, range: range) {
-            return match.date
+        guard let match = detector.firstMatch(in: trimmed, range: range), let date = match.date else {
+            return nil
         }
-        return nil
+
+        let matchedText = Range(match.range, in: trimmed).map { String(trimmed[$0]) } ?? ""
+        let hasTime = matchedText.contains(":")
+            || matchedText.range(of: "am", options: [.caseInsensitive]) != nil
+            || matchedText.range(of: "pm", options: [.caseInsensitive]) != nil
+        return ParsedDate(date: date, hasTimeComponent: hasTime)
     }
 }
