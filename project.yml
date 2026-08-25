@@ -1,0 +1,57 @@
+name: SchoolSync
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+
+packages:
+  SwiftSoup:
+    url: https://github.com/scinfu/SwiftSoup.git
+    from: "2.7.1"
+
+targets:
+  SchoolSync:
+    type: application
+    platform: iOS
+    sources:
+      - path: SchoolSync
+      - path: Shared
+    info:
+      path: SchoolSync/Info.plist
+    entitlements:
+      path: SchoolSync/SchoolSync.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.example.schoolsync
+    dependencies:
+      - package: SwiftSoup
+      - target: SchoolSyncShare
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.schoolsync
+        TARGETED_DEVICE_FAMILY: "1"
+
+  SchoolSyncShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: SchoolSyncShare
+      - path: Shared
+    info:
+      path: SchoolSyncShare/Info.plist
+    entitlements:
+      path: SchoolSyncShare/SchoolSyncShare.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.example.schoolsync
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.schoolsync.share
+        TARGETED_DEVICE_FAMILY: "1"
