@@ -46,6 +46,15 @@ SchoolSyncShare/          Share Extension target (receives forwarded/shared emai
 project.yml               XcodeGen project spec (generates the .xcodeproj)
 ```
 
+## Continuous integration
+
+`.github/workflows/ios-build.yml` builds this on GitHub's hosted macOS
+runners on every push — `xcodegen generate` then `xcodebuild build` for a
+simulator destination with code signing disabled. It only proves the code
+compiles and links; it doesn't sign anything or install on a device, so it
+needs no Apple Developer account or secrets. Check the Actions tab for
+results after pushing.
+
 ## Setup (requires a Mac with Xcode)
 
 This was written in a Linux container with no Xcode/iOS toolchain available,

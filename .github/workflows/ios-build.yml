@@ -1,0 +1,38 @@
+name: iOS Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve Swift Package dependencies
+        run: xcodebuild -resolvePackageDependencies -project SchoolSync.xcodeproj
+
+      # Simulator destination + signing disabled: this job only verifies the
+      # code compiles and links, not that it's ready to install on a device
+      # (that needs real signing, set up separately). CODE_SIGNING_ALLOWED=NO
+      # skips provisioning entirely so this doesn't need an Apple Developer
+      # account or any secrets.
+      - name: Build SchoolSync (app + embedded share extension)
+        run: |
+          xcodebuild build \
+            -project SchoolSync.xcodeproj \
+            -scheme SchoolSync \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
