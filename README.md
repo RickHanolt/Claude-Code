@@ -55,21 +55,32 @@ compiles and links; it doesn't sign anything or install on a device, so it
 needs no Apple Developer account or secrets. Check the Actions tab for
 results after pushing.
 
-## Setup (requires a Mac with Xcode)
+## Getting it onto a device
 
-This was written in a Linux container with no Xcode/iOS toolchain available,
-so none of it has been compiled or run yet. To build it:
+Two paths, depending on whether you have a Mac:
+
+- **No Mac available:** see [CLOUD_BUILD.md](CLOUD_BUILD.md) — builds,
+  signs, and ships to TestFlight entirely on Codemagic's hosted Mac
+  runners, driven by `codemagic.yaml`. Requires enrolling in Apple's
+  Developer Program ($99/year), since Apple requires that for any signed
+  build regardless of where it's built.
+- **Have a Mac with Xcode:** follow the steps below. You can use Xcode's
+  free personal-team signing to run on your own device without paying Apple
+  anything, at the cost of re-signing periodically and needing that Mac each
+  time.
+
+Bundle identifiers are already set to `com.rickhanolt.schoolsync` /
+`com.rickhanolt.schoolsync.share` (see `project.yml`) rather than
+placeholders — change them (and the matching App Group id in
+`Shared/Utilities/AppGroup.swift`) if you want different ones.
+
+### Building locally with Xcode
 
 1. Install [XcodeGen](https://github.com/yonaskolb/XcodeGen) if you don't have
    it: `brew install xcodegen`
 2. From the repo root: `xcodegen generate`
 3. Open `SchoolSync.xcodeproj` in Xcode.
-4. In both targets' **Signing & Capabilities**, set your Team and change the
-   bundle identifiers away from the `com.example.*` placeholders (e.g.
-   `com.yourname.schoolsync` and `com.yourname.schoolsync.share`) — Xcode will
-   offer to fix the matching App Group identifier, or edit
-   `group.com.example.schoolsync` in `project.yml` yourself and re-run
-   `xcodegen generate`.
+4. In both targets' **Signing & Capabilities**, set your Team.
 5. Build and run on a device or simulator running iOS 17+ (SwiftData and the
    `EKEventStore.requestFullAccessToEvents` API both require iOS 17).
 6. First launch: add each kid, then add each school under that kid, then grant

@@ -4,11 +4,15 @@ import Foundation
 /// same SwiftData store and the same pending-email-events queue.
 ///
 /// IMPORTANT: this identifier must match the `com.apple.security.application-groups`
-/// entry generated from `project.yml` for both targets. If you change the
-/// bundle identifiers away from the `com.example.*` placeholders, update the
-/// group id in `project.yml` (both targets) and here together.
+/// entry generated from `project.yml` for both targets, AND must be
+/// registered as an "App Group" identifier in the Apple Developer portal
+/// (developer.apple.com/account/resources/identifiers/list/application-group)
+/// and attached to both App IDs' capabilities before either target can be
+/// signed for a real device or TestFlight. If you change the bundle
+/// identifiers, update the group id in `project.yml` (both targets) and here
+/// together.
 enum AppGroup {
-    static let identifier = "group.com.example.schoolsync"
+    static let identifier = "group.com.rickhanolt.schoolsync"
 
     static var containerURL: URL {
         guard let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier) else {

@@ -1,0 +1,87 @@
+# Cloud build + sign + TestFlight publish for SchoolSync, with no Mac
+# required anywhere in the loop. Runs on Codemagic's hosted Mac build
+# machines. See CLOUD_BUILD.md for the one-time manual setup this depends on
+# (Apple Developer Program enrollment, App Store Connect API key, Codemagic
+# account + integration) — none of that can be done from this file.
+#
+# Codemagic CLI tool commands below (fetch-signing-files, keychain,
+# use-profiles, build-ipa) are Codemagic's standard, long-documented pattern
+# for natively-signed iOS apps. This hasn't been run against a live
+# Codemagic account yet — if a step errors on first run, check Codemagic's
+# current docs for that command's exact flags before changing anything else.
+
+workflows:
+  ios-testflight:
+    name: SchoolSync -> TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+
+    # "schoolsync_asc" must match the name you give the App Store Connect API
+    # key integration when you add it under Codemagic > Team settings >
+    # Integrations > Apple Developer Portal. This is what lets the
+    # `app-store-connect` CLI below authenticate without any secrets in this
+    # file.
+    integrations:
+      app_store_connect: schoolsync_asc
+
+    environment:
+      vars:
+        BUNDLE_ID_APP: "com.rickhanolt.schoolsync"
+        BUNDLE_ID_SHARE: "com.rickhanolt.schoolsync.share"
+        XCODE_PROJECT: "SchoolSync.xcodeproj"
+        XCODE_SCHEME: "SchoolSync"
+      xcode: latest
+
+    scripts:
+      - name: Install XcodeGen
+        script: brew install xcodegen
+
+      - name: Generate Xcode project from project.yml
+        script: xcodegen generate
+
+      - name: Set up keychain to store certificates
+        script: keychain initialize
+
+      # --create registers the App ID + provisioning profile in the Apple
+      # Developer portal automatically if they don't exist yet. It CANNOT
+      # create the App Group identifier itself or attach it as a capability
+      # on these App IDs — that's a one-time manual step in the Developer
+      # portal (see CLOUD_BUILD.md). Without that step done first, this will
+      # fail with a capability-mismatch error.
+      - name: Fetch signing files for the app
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID_APP" \
+            --type IOS_APP_STORE \
+            --create
+
+      - name: Fetch signing files for the share extension
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID_SHARE" \
+            --type IOS_APP_STORE \
+            --create
+
+      - name: Add certificates to keychain
+        script: keychain add-certificates
+
+      - name: Set up code signing settings on the generated Xcode project
+        script: xcode-project use-profiles
+
+      - name: Increment build number to the next TestFlight build
+        script: |
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$BUNDLE_ID_APP")
+          agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
+
+      - name: Build ipa for distribution
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
