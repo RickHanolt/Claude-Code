@@ -30,4 +30,12 @@ enum AppGroup {
     static var pendingEmailEventsURL: URL {
         containerURL.appendingPathComponent("PendingEmailEvents.json")
     }
+
+    /// Where the share extension queues the full original email (subject +
+    /// body) for the main app to store, independent of whether any event
+    /// candidates were found/confirmed for it — this is what backs the
+    /// Emails tab.
+    static var pendingForwardedEmailsURL: URL {
+        containerURL.appendingPathComponent("PendingForwardedEmails.json")
+    }
 }

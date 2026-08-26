@@ -12,6 +12,9 @@ struct ContentView: View {
             SchoolsListView()
                 .tabItem { Label("Schools", systemImage: "building.columns") }
 
+            EmailsListView()
+                .tabItem { Label("Emails", systemImage: "envelope") }
+
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }

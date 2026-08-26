@@ -43,6 +43,27 @@ struct EventStore {
         return count
     }
 
+    /// Drains full forwarded emails the share extension queued — these back
+    /// the Emails tab and are stored independent of whether any event
+    /// candidates were confirmed for them.
+    @discardableResult
+    func ingestPendingForwardedEmails() throws -> Int {
+        let pending = try SharedEmailQueue.readAll()
+        guard !pending.isEmpty else { return 0 }
+        for dto in pending {
+            let externalID = dto.id
+            let descriptor = FetchDescriptor<ForwardedEmailRecord>(
+                predicate: #Predicate { $0.externalID == externalID }
+            )
+            if try modelContext.fetch(descriptor).first == nil {
+                modelContext.insert(ForwardedEmailRecord(dto: dto))
+            }
+        }
+        try modelContext.save()
+        try SharedEmailQueue.clear()
+        return pending.count
+    }
+
     func fetchKids() throws -> [KidRecord] {
         try modelContext.fetch(FetchDescriptor<KidRecord>(sortBy: [SortDescriptor(\.name)]))
     }
@@ -63,6 +84,13 @@ struct EventStore {
         let descriptor = FetchDescriptor<SchoolEventRecord>(
             predicate: #Predicate { $0.kidID == kidID },
             sortBy: [SortDescriptor(\.startDate)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    func fetchForwardedEmails() throws -> [ForwardedEmailRecord] {
+        let descriptor = FetchDescriptor<ForwardedEmailRecord>(
+            sortBy: [SortDescriptor(\.sharedDate, order: .reverse)]
         )
         return try modelContext.fetch(descriptor)
     }

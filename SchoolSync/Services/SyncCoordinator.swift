@@ -25,6 +25,7 @@ struct SyncCoordinator {
         if let ingested = try? eventStore.ingestPendingEmailEvents() {
             result.eventsIngested += ingested
         }
+        _ = try? eventStore.ingestPendingForwardedEmails()
 
         guard let schools = try? eventStore.fetchAllSchools() else {
             result.errors.append("Could not read schools from the local store.")

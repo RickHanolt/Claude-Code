@@ -3,14 +3,19 @@ import SwiftData
 
 /// Lets the user review the dates `EmailParserService` found in a
 /// forwarded/shared email, pick which ones are real events, and assign a
-/// kid + school before anything is written to `SharedEventQueue`. Reads
+/// kid + school before anything is written to the shared queues. Reads
 /// kids/schools from the same App-Group-backed SwiftData store the main app
 /// uses, so newly-added kids/schools show up here without any extra sync
 /// step.
+///
+/// Saving always stores the full original email (for the Emails tab),
+/// independent of whether any date candidates were found or checked — the
+/// checked candidates additionally become calendar events.
 struct ShareConfirmationView: View {
     let subject: String
+    let bodyText: String
     let candidates: [ParsedCandidateEvent]
-    let onSave: ([SchoolEventDTO]) -> Void
+    let onSave: ([SchoolEventDTO], ForwardedEmailDTO) -> Void
     let onCancel: () -> Void
 
     @State private var selectedIDs: Set<UUID>
@@ -24,17 +29,19 @@ struct ShareConfirmationView: View {
 
     init(
         subject: String,
+        bodyText: String,
         candidates: [ParsedCandidateEvent],
-        onSave: @escaping ([SchoolEventDTO]) -> Void,
+        onSave: @escaping ([SchoolEventDTO], ForwardedEmailDTO) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.subject = subject
+        self.bodyText = bodyText
         self.candidates = candidates
         self.onSave = onSave
         self.onCancel = onCancel
         _selectedIDs = State(initialValue: Set(candidates.map(\.id)))
 
-        let schema = Schema([KidRecord.self, SchoolRecord.self, SchoolEventRecord.self])
+        let schema = Schema([KidRecord.self, SchoolRecord.self, SchoolEventRecord.self, ForwardedEmailRecord.self])
         let configuration = ModelConfiguration(schema: schema, url: AppGroup.sharedModelStoreURL)
         self.modelContainer = try? ModelContainer(for: schema, configurations: [configuration])
     }
@@ -51,33 +58,31 @@ struct ShareConfirmationView: View {
                     Text(subject).font(.headline)
                 }
 
-                if candidates.isEmpty {
-                    Section {
-                        Text("No dates found in this email. Nothing to save.")
+                Section("Detected dates") {
+                    if candidates.isEmpty {
+                        Text("No dates found in this email — you can still save it to browse later.")
                             .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Section("Detected dates") {
+                    } else {
                         ForEach(candidates) { candidate in
                             candidateRow(candidate)
                         }
                     }
+                }
 
-                    Section("Assign to") {
-                        if kids.isEmpty {
-                            Text("Add a kid in SchoolSync first.").foregroundStyle(.secondary)
+                Section("Assign to") {
+                    if kids.isEmpty {
+                        Text("Add a kid in SchoolSync first.").foregroundStyle(.secondary)
+                    } else {
+                        Picker("Kid", selection: $selectedKidID) {
+                            ForEach(kids) { kid in Text(kid.name).tag(Optional(kid.id)) }
+                        }
+                        if eligibleSchools.isEmpty {
+                            Text("No school for this kid accepts forwarded emails yet.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         } else {
-                            Picker("Kid", selection: $selectedKidID) {
-                                ForEach(kids) { kid in Text(kid.name).tag(Optional(kid.id)) }
-                            }
-                            if eligibleSchools.isEmpty {
-                                Text("No school for this kid accepts forwarded emails yet.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Picker("School", selection: $selectedSchoolID) {
-                                    ForEach(eligibleSchools) { school in Text(school.name).tag(Optional(school.id)) }
-                                }
+                            Picker("School", selection: $selectedSchoolID) {
+                                ForEach(eligibleSchools) { school in Text(school.name).tag(Optional(school.id)) }
                             }
                         }
                     }
@@ -121,7 +126,7 @@ struct ShareConfirmationView: View {
     }
 
     private var canSave: Bool {
-        !selectedIDs.isEmpty && selectedKidID != nil && selectedSchoolID != nil
+        selectedKidID != nil && selectedSchoolID != nil
     }
 
     private func loadKidsAndSchools() {
@@ -133,7 +138,8 @@ struct ShareConfirmationView: View {
 
     private func save() {
         guard let kidID = selectedKidID, let schoolID = selectedSchoolID else { return }
-        let dtos: [SchoolEventDTO] = candidates
+
+        let eventDTOs: [SchoolEventDTO] = candidates
             .filter { selectedIDs.contains($0.id) }
             .map { candidate in
                 SchoolEventDTO(
@@ -149,6 +155,16 @@ struct ShareConfirmationView: View {
                     source: .emailForward
                 )
             }
-        onSave(dtos)
+
+        let emailDTO = ForwardedEmailDTO(
+            id: UUID().uuidString,
+            subject: subject,
+            bodyText: bodyText,
+            sharedDate: .now,
+            kidID: kidID,
+            schoolID: schoolID
+        )
+
+        onSave(eventDTOs, emailDTO)
     }
 }

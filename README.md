@@ -105,7 +105,13 @@ When you add a school in the app you choose one or more sources:
   these in per school — there's no way to do this generically since every
   school site is different.
 - **Accept forwarded emails** — toggle this on and the school will appear as
-  a destination option in the share-extension confirmation screen.
+  a destination option in the share-extension confirmation screen. Every
+  email you save this way is stored in full under the **Emails** tab
+  (regardless of whether any date candidates were found/confirmed for it),
+  and any checked candidates additionally become calendar events. Detected
+  dates that fall on the same day you're sharing are filtered out by
+  default — this is meant to catch newsletter "posted on" metadata rather
+  than real events, at the cost of missing genuine same-day event notices.
 
 ## Known limitations / next steps
 

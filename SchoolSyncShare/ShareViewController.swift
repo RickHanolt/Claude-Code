@@ -51,15 +51,16 @@ final class ShareViewController: UIViewController {
         }
 
         let candidates = EmailParserService().extractCandidateEvents(subject: subject, bodyText: bodyText)
-        presentConfirmation(subject: subject, candidates: candidates)
+        presentConfirmation(subject: subject, bodyText: bodyText, candidates: candidates)
     }
 
-    private func presentConfirmation(subject: String, candidates: [ParsedCandidateEvent]) {
+    private func presentConfirmation(subject: String, bodyText: String, candidates: [ParsedCandidateEvent]) {
         let confirmationView = ShareConfirmationView(
             subject: subject.isEmpty ? "Forwarded event" : subject,
+            bodyText: bodyText,
             candidates: candidates,
-            onSave: { [weak self] dtos in
-                self?.save(dtos)
+            onSave: { [weak self] events, email in
+                self?.save(events: events, email: email)
             },
             onCancel: { [weak self] in
                 self?.cancel()
@@ -79,8 +80,9 @@ final class ShareViewController: UIViewController {
         hosting.didMove(toParent: self)
     }
 
-    private func save(_ dtos: [SchoolEventDTO]) {
-        try? SharedEventQueue.append(dtos)
+    private func save(events: [SchoolEventDTO], email: ForwardedEmailDTO) {
+        try? SharedEventQueue.append(events)
+        try? SharedEmailQueue.append([email])
         extensionContext?.completeRequest(returningItems: nil)
     }
 
