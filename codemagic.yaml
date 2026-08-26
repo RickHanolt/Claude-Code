@@ -104,13 +104,30 @@ workflows:
             --verbose
 
       # TEMPORARY diagnostic: App Store Connect rejected the upload saying
-      # NSExtensionPointIdentifier is missing from the built
-      # SchoolSyncShare.appex Info.plist, but the source SchoolSyncShare/
-      # Info.plist clearly has it — something is dropping it between source
-      # and the archived binary. Inspect the real built plist instead of
-      # guessing why. Remove once the cause is found and fixed.
-      - name: DEBUG inspect built share extension Info.plist
+      # NSExtensionPointIdentifier AND CFBundleDisplayName are both missing
+      # from the built SchoolSyncShare.appex Info.plist, even though the
+      # source file clearly has both, and every other key (including
+      # variable-substituted ones like $(PRODUCT_BUNDLE_IDENTIFIER)) came
+      # through correctly — ruling out both prior theories (Xcode
+      # synthesizing the whole plist from scratch would not have preserved
+      # substituted values this precisely). Check the plist inside the raw
+      # .xcarchive (before export) too, to see whether archiving or
+      # exporting is where these two keys get dropped. Remove once the
+      # cause is found and fixed.
+      - name: DEBUG inspect archive and ipa Info.plist
         script: |
+          echo "=== Archive (pre-export) ==="
+          ARCHIVE_PLIST=$(find /Users/builder/clone/build/ios/xcarchive -iname "Info.plist" -path "*SchoolSyncShare*" 2>/dev/null | head -1)
+          if [ -z "$ARCHIVE_PLIST" ]; then
+            echo "No SchoolSyncShare Info.plist found under build/ios/xcarchive. Structure:"
+            find /Users/builder/clone/build/ios/xcarchive -maxdepth 8 2>/dev/null
+          else
+            echo "Archive Info.plist: $ARCHIVE_PLIST"
+            plutil -p "$ARCHIVE_PLIST"
+          fi
+
+          echo ""
+          echo "=== Exported .ipa ==="
           IPA_PATH=$(find /Users/builder/clone/build/ios/ipa -name "*.ipa" | head -1)
           echo "IPA: $IPA_PATH"
           if [ -z "$IPA_PATH" ]; then
