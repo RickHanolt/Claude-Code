@@ -23,15 +23,6 @@ settings:
     # pick a profile interactively, which has no way to succeed in a
     # headless CI shell and fails with a generic "Failed to archive" error.
     CODE_SIGN_STYLE: Manual
-    # App Store Connect rejected the SchoolSyncShare upload: "the
-    # NSExtensionPointIdentifier key must be present in the NSExtension
-    # dictionary" — even though SchoolSyncShare/Info.plist clearly has it.
-    # Recent Xcode defaults extension targets to synthesizing Info.plist
-    # from build settings (GENERATE_INFOPLIST_FILE=YES) rather than using a
-    # physical file as-is, and that synthesis has no way to produce a
-    # complex nested key like NSExtension — it silently drops it. Forcing
-    # this off makes Xcode use the real file's content unmodified.
-    GENERATE_INFOPLIST_FILE: NO
 
 packages:
   SwiftSoup:
@@ -45,8 +36,25 @@ targets:
     sources:
       - path: SchoolSync
       - path: Shared
+    # XcodeGen does NOT use info.path as an existing file's content — it
+    # generates a fresh Info.plist from its own built-in defaults merged
+    # with `properties` below, and overwrites whatever's on disk at `path`
+    # every run. Any key not listed here (and not one of XcodeGen's own
+    # defaults, like CFBundleIdentifier/CFBundleExecutable/etc.) is silently
+    # absent from the built app — this is what caused calendar permission
+    # keys to go missing from every build so far.
     info:
       path: SchoolSync/Info.plist
+      properties:
+        CFBundleDisplayName: SchoolSync
+        LSRequiresIPhoneOS: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSCalendarsFullAccessUsageDescription: "SchoolSync writes each kid's school events into a dedicated calendar so you can see everything alongside your other calendars."
+        NSCalendarsUsageDescription: "SchoolSync writes each kid's school events into a dedicated calendar so you can see everything alongside your other calendars."
     entitlements:
       path: SchoolSync/SchoolSync.entitlements
       properties:
@@ -68,8 +76,21 @@ targets:
     sources:
       - path: SchoolSyncShare
       - path: Shared
+    # See the comment on SchoolSync's `info` above — XcodeGen regenerates
+    # this file from `properties` every run rather than using an existing
+    # physical file's content. This is where the NSExtensionPointIdentifier
+    # / CFBundleDisplayName App Store Connect rejection actually came from.
     info:
       path: SchoolSyncShare/Info.plist
+      properties:
+        CFBundleDisplayName: Add to SchoolSync
+        NSExtension:
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsAttachmentsWithMaxCount: 1
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionPointIdentifier: com.apple.share-services
     entitlements:
       path: SchoolSyncShare/SchoolSyncShare.entitlements
       properties:

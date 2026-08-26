@@ -9,3 +9,9 @@ DerivedData/
 *.mode1v3
 *.mode2v3
 *.perspectivev3
+
+# XcodeGen generates these fresh from project.yml's `info.properties` every
+# run (see the comments there) — a checked-in copy would be stale/misleading
+# and get overwritten anyway.
+SchoolSync/Info.plist
+SchoolSyncShare/Info.plist
