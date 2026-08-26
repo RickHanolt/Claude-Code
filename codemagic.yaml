@@ -103,6 +103,22 @@ workflows:
             --scheme "$XCODE_SCHEME" \
             --verbose
 
+      # TEMPORARY diagnostic: App Store Connect rejected the upload saying
+      # NSExtensionPointIdentifier is missing from the built
+      # SchoolSyncShare.appex Info.plist, but the source SchoolSyncShare/
+      # Info.plist clearly has it — something is dropping it between source
+      # and the archived binary. Inspect the real built plist instead of
+      # guessing why. Remove once the cause is found and fixed.
+      - name: DEBUG inspect built share extension Info.plist
+        script: |
+          IPA_PATH=$(find /Users/builder/clone/build/ios/ipa -name "*.ipa" | head -1)
+          echo "IPA: $IPA_PATH"
+          TMP_DIR=$(mktemp -d)
+          unzip -q "$IPA_PATH" -d "$TMP_DIR"
+          PLIST_PATH=$(find "$TMP_DIR" -path "*SchoolSyncShare.appex/Info.plist")
+          echo "Extension Info.plist: $PLIST_PATH"
+          plutil -p "$PLIST_PATH"
+
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
