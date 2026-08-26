@@ -93,11 +93,15 @@ workflows:
           LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$BUNDLE_ID_APP")
           agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
 
+      # --verbose: without it, a failed archive only prints a terse "Failed
+      # to archive ..." with no indication of why. With it, the real
+      # xcodebuild output (the actual `error:` line) streams into this log.
       - name: Build ipa for distribution
         script: |
           xcode-project build-ipa \
             --project "$XCODE_PROJECT" \
-            --scheme "$XCODE_SCHEME"
+            --scheme "$XCODE_SCHEME" \
+            --verbose
 
     artifacts:
       - build/ios/ipa/*.ipa
