@@ -55,6 +55,12 @@ targets:
           - UIInterfaceOrientationPortrait
         NSCalendarsFullAccessUsageDescription: "SchoolSync writes each kid's school events into a dedicated calendar so you can see everything alongside your other calendars."
         NSCalendarsUsageDescription: "SchoolSync writes each kid's school events into a dedicated calendar so you can see everything alongside your other calendars."
+        # The app implements no encryption itself — only standard HTTPS via
+        # URLSession (OS-provided TLS) for fetching ICS feeds/scraping school
+        # pages, and SHA256 for non-secret dedup hashing, not confidentiality.
+        # That's Apple's "exempt" category; declaring it here skips the
+        # export-compliance question on every future TestFlight upload.
+        ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: SchoolSync/SchoolSync.entitlements
       properties:
