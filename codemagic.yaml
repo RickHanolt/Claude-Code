@@ -113,9 +113,19 @@ workflows:
         script: |
           IPA_PATH=$(find /Users/builder/clone/build/ios/ipa -name "*.ipa" | head -1)
           echo "IPA: $IPA_PATH"
+          if [ -z "$IPA_PATH" ]; then
+            echo "No .ipa found under /Users/builder/clone/build/ios/ipa"
+            find /Users/builder/clone/build -maxdepth 4
+            exit 0
+          fi
           TMP_DIR=$(mktemp -d)
           unzip -q "$IPA_PATH" -d "$TMP_DIR"
-          PLIST_PATH=$(find "$TMP_DIR" -path "*SchoolSyncShare.appex/Info.plist")
+          PLIST_PATH=$(find "$TMP_DIR" -iname "Info.plist" -path "*SchoolSyncShare*")
+          if [ -z "$PLIST_PATH" ]; then
+            echo "No SchoolSyncShare Info.plist found. Full extracted structure:"
+            find "$TMP_DIR" -maxdepth 6
+            exit 0
+          fi
           echo "Extension Info.plist: $PLIST_PATH"
           plutil -p "$PLIST_PATH"
 

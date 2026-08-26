@@ -23,6 +23,15 @@ settings:
     # pick a profile interactively, which has no way to succeed in a
     # headless CI shell and fails with a generic "Failed to archive" error.
     CODE_SIGN_STYLE: Manual
+    # App Store Connect rejected the SchoolSyncShare upload: "the
+    # NSExtensionPointIdentifier key must be present in the NSExtension
+    # dictionary" — even though SchoolSyncShare/Info.plist clearly has it.
+    # Recent Xcode defaults extension targets to synthesizing Info.plist
+    # from build settings (GENERATE_INFOPLIST_FILE=YES) rather than using a
+    # physical file as-is, and that synthesis has no way to produce a
+    # complex nested key like NSExtension — it silently drops it. Forcing
+    # this off makes Xcode use the real file's content unmodified.
+    GENERATE_INFOPLIST_FILE: NO
 
 packages:
   SwiftSoup:
