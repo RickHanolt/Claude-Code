@@ -93,24 +93,6 @@ workflows:
           LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$BUNDLE_ID_APP")
           agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
 
-      # TEMPORARY diagnostic step: `xcode-project build-ipa`'s own --verbose
-      # flag only adds the wrapper's internal "Execute .../Completed ... in
-      # 00:03" chatter, not xcodebuild's real output — a 3-second failure is
-      # too fast to be a real compile error, more likely a signing/profile
-      # pre-check. Calling xcodebuild directly (same args Codemagic itself
-      # was passing) bypasses that wrapper so its actual output streams into
-      # this log. Remove this step once the real cause is found and fixed.
-      - name: DEBUG raw archive
-        script: |
-          xcodebuild -project "$XCODE_PROJECT" \
-            -scheme "$XCODE_SCHEME" \
-            -archivePath /tmp/debug.xcarchive \
-            archive \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            DEVELOPMENT_TEAM=R75YW2U3W8 \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            CODE_SIGN_STYLE=Manual
-
       # --verbose: without it, a failed archive only prints a terse "Failed
       # to archive ..." with no indication of why. With it, the real
       # xcodebuild output (the actual `error:` line) streams into this log.
