@@ -88,9 +88,15 @@ workflows:
       - name: Set up code signing settings on the generated Xcode project
         script: xcode-project use-profiles
 
+      # get-latest-app-store-build-number only counts builds that went
+      # through a full App Store release, which we've never done — it kept
+      # returning 0, so every upload got build number 1 again, and Apple
+      # rejects re-using a build number even from a failed/incomplete
+      # upload. get-latest-build-number checks both TestFlight and App
+      # Store uploads, so it actually reflects what Apple has on record.
       - name: Increment build number to the next TestFlight build
         script: |
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$BUNDLE_ID_APP")
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-build-number "$BUNDLE_ID_APP")
           agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
 
       # --verbose: without it, a failed archive only prints a terse "Failed
