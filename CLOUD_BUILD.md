@@ -63,8 +63,10 @@ App Store Connect → **Users and Access** → **Integrations** tab → **App
 Store Connect API** → **Team Keys** → **Generate API Key**.
 
 - Name it anything (e.g. "Codemagic CI")
-- Access role: **App Manager** (needed for both signing-file management and
-  TestFlight uploads)
+- Access role: **Admin** — this needs to cover both Certificates/Identifiers/
+  Profiles management (for creating the signing certificate) and TestFlight
+  uploads, and Admin is the simplest role that's guaranteed to cover both
+  without guessing at Apple's exact permission matrix.
 - Download the `.p8` private key file **immediately** — Apple only lets you
   download it once, ever. Note the **Key ID** and **Issuer ID** shown on the
   same page.
@@ -86,7 +88,39 @@ only goes into Codemagic's own encrypted integration storage (next step).
    should detect `codemagic.yaml` automatically and offer the
    `ios-testflight` workflow.
 
-## 6. Run the first build
+## 6. Generate a certificate private key and add it to Codemagic
+
+`codemagic.yaml`'s signing steps use `app-store-connect fetch-signing-files
+--create` to have Apple issue a new "Apple Distribution" certificate. That
+command needs a private key to build the certificate request from — it does
+**not** generate one itself, which is what caused the
+`Cannot save Signing Certificates without certificate private key` error if
+you hit it on an earlier attempt.
+
+1. Generate an RSA private key. On macOS/Linux, or Git Bash on Windows, run:
+   ```
+   openssl genrsa -out ios_distribution_private_key.pem 2048
+   ```
+   This creates a file containing a PEM-format private key (starts with
+   `-----BEGIN RSA PRIVATE KEY-----`). On Windows without Git Bash, the same
+   command works in PowerShell if OpenSSL is installed, or use
+   `ssh-keygen -t rsa -b 2048 -m PEM -f ios_distribution_private_key -q -N ""`
+   instead (ships with Windows 10/11's built-in OpenSSH client).
+2. Open that file in a text editor and copy its *entire* contents, including
+   the `-----BEGIN...-----` and `-----END...-----` lines.
+3. In Codemagic, go to your app → **Settings** (or wherever environment
+   variables are configured for the app) → **Environment variables**.
+4. Add a new variable:
+   - Name: `CERTIFICATE_PRIVATE_KEY`
+   - Value: the full key contents you copied
+   - Mark it **Secure** so it's encrypted and hidden from build logs
+   - Group: create/select a group named exactly **`ios_signing`** — that's
+     what `codemagic.yaml` references under `environment.groups`
+5. Save. Delete the local `ios_distribution_private_key.pem` file once it's
+   safely stored in Codemagic — you don't need to keep a copy, and it's a
+   real credential like the `.p8` file.
+
+## 7. Run the first build
 
 From the Codemagic dashboard: **Start new build** → branch
 `claude/getting-started-coding-bcrw93` → workflow `ios-testflight`. Watch the
@@ -98,7 +132,7 @@ If a step fails, the error message will usually say exactly what's
 missing (a capability not attached, a wrong integration name, etc.) — send
 me the log and I'll fix `codemagic.yaml` or the project config.
 
-## 7. Install it on your iPhone
+## 8. Install it on your iPhone
 
 Once the build succeeds, `codemagic.yaml` uploads it to TestFlight
 automatically. In App Store Connect → your app → **TestFlight** tab, add

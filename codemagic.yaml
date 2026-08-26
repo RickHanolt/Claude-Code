@@ -25,6 +25,15 @@ workflows:
       app_store_connect: schoolsync_asc
 
     environment:
+      # "ios_signing" is a Codemagic environment variable GROUP (Application
+      # settings > Environment variables), not the integration above. It must
+      # contain a variable named CERTIFICATE_PRIVATE_KEY: the full contents
+      # of an RSA private key (PEM), used below to generate the Apple
+      # Distribution certificate's CSR. `fetch-signing-files --create` does
+      # NOT generate this key itself — it has to be supplied. See
+      # CLOUD_BUILD.md for how to generate and add it.
+      groups:
+        - ios_signing
       vars:
         BUNDLE_ID_APP: "com.rickhanolt.schoolsync"
         BUNDLE_ID_SHARE: "com.rickhanolt.schoolsync.share"
@@ -48,16 +57,23 @@ workflows:
       # on these App IDs — that's a one-time manual step in the Developer
       # portal (see CLOUD_BUILD.md). Without that step done first, this will
       # fail with a capability-mismatch error.
+      # --certificate-key=@env:CERTIFICATE_PRIVATE_KEY tells the tool to read
+      # the key from that env var itself, rather than shell-expanding a
+      # multi-line PEM value onto the command line (which would risk
+      # breaking on the key's newlines and would expose it in the process
+      # list).
       - name: Fetch signing files for the app
         script: |
           app-store-connect fetch-signing-files "$BUNDLE_ID_APP" \
             --type IOS_APP_STORE \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
 
       - name: Fetch signing files for the share extension
         script: |
           app-store-connect fetch-signing-files "$BUNDLE_ID_SHARE" \
             --type IOS_APP_STORE \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
 
       - name: Add certificates to keychain
