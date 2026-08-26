@@ -15,3 +15,8 @@ DerivedData/
 # and get overwritten anyway.
 SchoolSync/Info.plist
 SchoolSyncShare/Info.plist
+
+# Ingest backend (Cloudflare Worker)
+Ingest/node_modules/
+Ingest/.wrangler/
+Ingest/.dev.vars

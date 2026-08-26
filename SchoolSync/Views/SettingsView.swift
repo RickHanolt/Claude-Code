@@ -7,6 +7,10 @@ struct SettingsView: View {
     @State private var lastResult: SyncResult?
     @State private var calendarAccessGranted: Bool?
 
+    @State private var ingestBaseURLText: String = IngestSettings.baseURL?.absoluteString ?? ""
+    @State private var ingestAPIKeyText: String = IngestSettings.apiKey ?? ""
+    @State private var ingestSaved = false
+
     var body: some View {
         NavigationStack {
             Form {
@@ -38,10 +42,37 @@ struct SettingsView: View {
                         Text("\(result.eventsIngested) events updated")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if result.pendingReviewCount > 0 {
+                            Text("\(result.pendingReviewCount) auto-forwarded email(s) waiting for review")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         ForEach(result.errors, id: \.self) { error in
                             Text(error).font(.caption).foregroundStyle(.red)
                         }
                     }
+                }
+
+                Section {
+                    TextField("Backend URL", text: $ingestBaseURLText)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("API Key", text: $ingestAPIKeyText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Save") { saveIngestSettings() }
+                    if ingestSaved {
+                        Text("Saved.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    NavigationLink("Check for auto-forwarded emails") {
+                        PendingReviewView()
+                    }
+                    .disabled(!IngestSettings.isConfigured)
+                } header: {
+                    Text("Auto-forward backend")
+                } footer: {
+                    Text("Optional — only needed if you set up the auto-forward backend from INGEST_BACKEND.md. Values from step 9 there (the ingestAddress's Worker URL and the apiKey). Leave blank to keep sharing emails manually.")
                 }
 
                 Section("About") {
@@ -60,6 +91,14 @@ struct SettingsView: View {
     private func requestAccess() async {
         let service = CalendarSyncService()
         calendarAccessGranted = try? await service.requestAccess()
+    }
+
+    private func saveIngestSettings() {
+        let trimmedURL = ingestBaseURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedKey = ingestAPIKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        IngestSettings.baseURL = trimmedURL.isEmpty ? nil : URL(string: trimmedURL)
+        IngestSettings.apiKey = trimmedKey.isEmpty ? nil : trimmedKey
+        ingestSaved = true
     }
 
     private func sync() async {

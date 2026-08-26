@@ -1,0 +1,76 @@
+name: Ingest Backend
+
+on:
+  push:
+    paths:
+      - "Ingest/**"
+      - ".github/workflows/ingest-deploy.yml"
+  pull_request:
+    paths:
+      - "Ingest/**"
+  workflow_dispatch:
+
+jobs:
+  # Always runs, needs no secrets — catches real TypeScript errors the same
+  # way ios-build.yml catches Swift ones, before anything touches Cloudflare.
+  typecheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Ingest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run typecheck
+
+  # Deploys the Worker + applies D1 migrations. No-ops (not fails) until
+  # CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID repo secrets are set — see
+  # INGEST_BACKEND.md — so this job stays green before and after that setup.
+  deploy:
+    needs: typecheck
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Ingest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      INGEST_ADMIN_TOKEN: ${{ secrets.INGEST_ADMIN_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+
+      - name: Check Cloudflare secrets are configured
+        id: check
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Cloudflare secrets not set yet — skipping deploy (see INGEST_BACKEND.md)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply D1 migrations
+        if: steps.check.outputs.skip == 'false'
+        run: npm run db:migrate:remote
+
+      - name: Deploy worker
+        if: steps.check.outputs.skip == 'false'
+        run: npm run deploy
+
+      # ADMIN_TOKEN protects the household-provisioning endpoint. Keeping it
+      # as a GitHub secret and pushing it to Cloudflare on every deploy means
+      # there's one place to manage it, same pattern as the signing secrets
+      # in codemagic.yaml — no local `wrangler secret put` needed.
+      - name: Sync ADMIN_TOKEN worker secret
+        if: steps.check.outputs.skip == 'false' && env.INGEST_ADMIN_TOKEN != ''
+        env:
+          INGEST_ADMIN_TOKEN: ${{ secrets.INGEST_ADMIN_TOKEN }}
+        run: echo "$INGEST_ADMIN_TOKEN" | npx wrangler secret put ADMIN_TOKEN

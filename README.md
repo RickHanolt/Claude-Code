@@ -113,6 +113,13 @@ When you add a school in the app you choose one or more sources:
   default — this is meant to catch newsletter "posted on" metadata rather
   than real events, at the cost of missing genuine same-day event notices.
 
+  Sharing each email by hand is the default (and only fully on-device) path.
+  If you'd rather set up a mail rule that auto-forwards matching senders and
+  have the app pick the results up on its own, see
+  [INGEST_BACKEND.md](INGEST_BACKEND.md) — it's an optional add-on with a
+  real trade-off (a small backend now sees these emails, not just your
+  phone), so it's kept separate rather than the default.
+
 ## Known limitations / next steps
 
 - **No way to edit a school once added** — `SchoolsListView` only supports
@@ -131,4 +138,7 @@ When you add a school in the app you choose one or more sources:
   EventKit calendar it writes to syncs, via your existing iCloud Calendar
   sync).
 - No background refresh yet — sync currently runs on demand from Settings.
-  Adding a `BGAppRefreshTask` is a natural next step.
+  Adding a `BGAppRefreshTask` is a natural next step. This also covers the
+  auto-forward backend (Ingest/, see INGEST_BACKEND.md): the app only checks
+  for new auto-forwarded emails when you tap Sync Now or "Check for
+  auto-forwarded emails" in Settings, not automatically in the background.

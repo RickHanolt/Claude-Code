@@ -51,17 +51,25 @@ struct EventStore {
         let pending = try SharedEmailQueue.readAll()
         guard !pending.isEmpty else { return 0 }
         for dto in pending {
-            let externalID = dto.id
-            let descriptor = FetchDescriptor<ForwardedEmailRecord>(
-                predicate: #Predicate { $0.externalID == externalID }
-            )
-            if try modelContext.fetch(descriptor).first == nil {
-                modelContext.insert(ForwardedEmailRecord(dto: dto))
-            }
+            try insertForwardedEmailIfNeeded(dto)
         }
-        try modelContext.save()
         try SharedEmailQueue.clear()
         return pending.count
+    }
+
+    /// Inserts a forwarded email into the store unless one with the same
+    /// external id already exists (matches by `externalID`, same
+    /// de-duplication key as `SchoolEventRecord`). Used both by the queue
+    /// drain above and directly by `PendingReviewView` when confirming an
+    /// email pulled from the Ingest backend.
+    func insertForwardedEmailIfNeeded(_ dto: ForwardedEmailDTO) throws {
+        let externalID = dto.id
+        let descriptor = FetchDescriptor<ForwardedEmailRecord>(
+            predicate: #Predicate { $0.externalID == externalID }
+        )
+        guard try modelContext.fetch(descriptor).first == nil else { return }
+        modelContext.insert(ForwardedEmailRecord(dto: dto))
+        try modelContext.save()
     }
 
     func fetchKids() throws -> [KidRecord] {

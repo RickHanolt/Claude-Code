@@ -4,6 +4,7 @@ import SwiftData
 struct SyncResult {
     var eventsIngested: Int = 0
     var errors: [String] = []
+    var pendingReviewCount: Int = 0
 }
 
 /// Orchestrates a full sync: drain pending email events, fetch every
@@ -26,6 +27,16 @@ struct SyncCoordinator {
             result.eventsIngested += ingested
         }
         _ = try? eventStore.ingestPendingForwardedEmails()
+
+        // Auto-forward backend (optional — see INGEST_BACKEND.md): unlike
+        // the share-extension queue above, these arrive with no kid/school
+        // assignment yet, so we only surface a count here and let
+        // PendingReviewView handle the actual review/save.
+        if let client = IngestClient.configured() {
+            if let pending = try? await client.fetchPending() {
+                result.pendingReviewCount = pending.emails.count
+            }
+        }
 
         guard let schools = try? eventStore.fetchAllSchools() else {
             result.errors.append("Could not read schools from the local store.")

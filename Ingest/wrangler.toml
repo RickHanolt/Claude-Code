@@ -1,0 +1,20 @@
+name = "schoolsync-ingest"
+main = "src/index.ts"
+compatibility_date = "2024-09-25"
+compatibility_flags = ["nodejs_compat"]
+
+# Created via `wrangler d1 create schoolsync_ingest` — paste the database_id
+# that command prints back in here before deploying.
+[[d1_databases]]
+binding = "DB"
+database_name = "schoolsync_ingest"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# ADMIN_TOKEN (used to provision new households) is a secret, not a var —
+# set it with `wrangler secret put ADMIN_TOKEN`, never commit it here.
+[vars]
+INGEST_DOMAIN = "mail.yourdomain.com"
+
+# Inbound mail delivery itself is wired up in the Cloudflare dashboard
+# (Email Routing -> Routing rules -> Action "Send to Worker" -> this worker),
+# not here — Email Routing bindings aren't expressed in wrangler.toml.
