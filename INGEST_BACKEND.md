@@ -96,9 +96,11 @@ use to poll for new emails. From any machine with a browser, open
 
 The response is `{"ingestAddress": "...", "apiKey": "..."}` — **copy both,
 the API key is shown exactly once and can't be recovered** (you'd have to
-provision a new household if you lose it). These two values go into the
-app's Settings once that screen exists (tracked separately — the iOS side
-of this isn't built yet).
+provision a new household if you lose it). Enter the Worker URL from step 7
+(`https://schoolsync-ingest.<your-subdomain>.workers.dev`) as **Backend
+URL** and the `apiKey` as **API Key** in the app's Settings screen, under
+"Auto-forward backend," then tap Save. A "Check for auto-forwarded emails"
+link appears there once both are set.
 
 ## 10. Set up the actual forwarding
 
