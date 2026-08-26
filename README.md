@@ -109,6 +109,11 @@ When you add a school in the app you choose one or more sources:
 
 ## Known limitations / next steps
 
+- **No way to edit a school once added** — `SchoolsListView` only supports
+  add and swipe-to-delete, so fixing a typo'd ICS URL or tweaking a scrape
+  selector means deleting and re-adding. Straightforward fix: reuse
+  `AddSchoolView`'s form pre-populated with the existing school's values,
+  wired to update instead of insert.
 - Scraping selectors are per-school and manual; there's no auto-detection.
 - Email parsing is a date-detector heuristic (finds dates in forwarded text
   and uses the email subject as the event title) — good enough to review and
@@ -121,5 +126,3 @@ When you add a school in the app you choose one or more sources:
   sync).
 - No background refresh yet — sync currently runs on demand from Settings.
   Adding a `BGAppRefreshTask` is a natural next step.
-- Nothing in this scaffold has been run in Xcode/Simulator — expect to fix
-  small build errors on first compile.
