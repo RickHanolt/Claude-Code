@@ -27,11 +27,15 @@ workflows:
     environment:
       # "ios_signing" is a Codemagic environment variable GROUP (Application
       # settings > Environment variables), not the integration above. It must
-      # contain a variable named CERTIFICATE_PRIVATE_KEY: the full contents
-      # of an RSA private key (PEM), used below to generate the Apple
-      # Distribution certificate's CSR. `fetch-signing-files --create` does
-      # NOT generate this key itself — it has to be supplied. See
-      # CLOUD_BUILD.md for how to generate and add it.
+      # contain a variable named CERTIFICATE_PRIVATE_KEY_B64: an RSA private
+      # key (PEM), base64-encoded onto a single line. `fetch-signing-files
+      # --create` does NOT generate this key itself — it has to be supplied.
+      # Base64-encoded (rather than raw multi-line PEM) specifically so
+      # pasting it into a web form has no line breaks to lose — a multi-line
+      # secret is an easy way to get silently mangled by a form field. The
+      # "Decode certificate private key" step below turns it back into a
+      # real PEM file before signing. See CLOUD_BUILD.md for how to generate
+      # and add it.
       groups:
         - ios_signing
       vars:
@@ -51,29 +55,31 @@ workflows:
       - name: Set up keychain to store certificates
         script: keychain initialize
 
+      - name: Decode certificate private key
+        script: |
+          echo "$CERTIFICATE_PRIVATE_KEY_B64" | base64 --decode > /tmp/certificate_private_key.pem
+          # Sanity-check it decoded to a real key before signing steps rely on
+          # it — fail loudly here rather than get another opaque error later.
+          openssl rsa -in /tmp/certificate_private_key.pem -check -noout
+
       # --create registers the App ID + provisioning profile in the Apple
       # Developer portal automatically if they don't exist yet. It CANNOT
       # create the App Group identifier itself or attach it as a capability
       # on these App IDs — that's a one-time manual step in the Developer
       # portal (see CLOUD_BUILD.md). Without that step done first, this will
       # fail with a capability-mismatch error.
-      # --certificate-key=@env:CERTIFICATE_PRIVATE_KEY tells the tool to read
-      # the key from that env var itself, rather than shell-expanding a
-      # multi-line PEM value onto the command line (which would risk
-      # breaking on the key's newlines and would expose it in the process
-      # list).
       - name: Fetch signing files for the app
         script: |
           app-store-connect fetch-signing-files "$BUNDLE_ID_APP" \
             --type IOS_APP_STORE \
-            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
+            --certificate-key=@file:/tmp/certificate_private_key.pem \
             --create
 
       - name: Fetch signing files for the share extension
         script: |
           app-store-connect fetch-signing-files "$BUNDLE_ID_SHARE" \
             --type IOS_APP_STORE \
-            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
+            --certificate-key=@file:/tmp/certificate_private_key.pem \
             --create
 
       - name: Add certificates to keychain

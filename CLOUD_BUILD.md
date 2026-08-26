@@ -97,28 +97,37 @@ command needs a private key to build the certificate request from — it does
 `Cannot save Signing Certificates without certificate private key` error if
 you hit it on an earlier attempt.
 
-1. Generate an RSA private key. On macOS/Linux, or Git Bash on Windows, run:
+1. Generate an RSA private key (PEM, starts with
+   `-----BEGIN RSA PRIVATE KEY-----`). On macOS/Linux, or Git Bash on
+   Windows:
    ```
-   openssl genrsa -out ios_distribution_private_key.pem 2048
+   openssl genrsa -traditional -out key.pem 2048
    ```
-   This creates a file containing a PEM-format private key (starts with
-   `-----BEGIN RSA PRIVATE KEY-----`). On Windows without Git Bash, the same
-   command works in PowerShell if OpenSSL is installed, or use
-   `ssh-keygen -t rsa -b 2048 -m PEM -f ios_distribution_private_key -q -N ""`
-   instead (ships with Windows 10/11's built-in OpenSSH client).
-2. Open that file in a text editor and copy its *entire* contents, including
-   the `-----BEGIN...-----` and `-----END...-----` lines.
-3. In Codemagic, go to your app → **Settings** (or wherever environment
-   variables are configured for the app) → **Environment variables**.
+   (`-traditional` matters — without it, modern OpenSSL defaults to PKCS#8
+   output, `-----BEGIN PRIVATE KEY-----` with no "RSA", which Apple's
+   tooling doesn't expect.) On Windows without Git Bash:
+   `ssh-keygen -t rsa -b 2048 -m PEM -f key -q -N ""` works with the
+   built-in OpenSSH client instead.
+2. Base64-encode it onto a single line — don't paste the raw multi-line PEM
+   into Codemagic's variable field directly; a multi-line secret is an easy
+   way for a web form to silently mangle it (this is exactly what caused an
+   `argument --certificate-key: Not a valid certificate private key` error
+   during setup). On macOS/Linux: `base64 -i key.pem | tr -d '\n'` (macOS)
+   or `base64 -w0 key.pem` (Linux) prints one continuous line — copy that.
+3. In Codemagic, go to your app → **Settings** → **Environment variables**
+   (the *app-level* page — the older global/team-level "codemagic.yaml
+   settings" page is being phased out for personal accounts and won't work).
 4. Add a new variable:
-   - Name: `CERTIFICATE_PRIVATE_KEY`
-   - Value: the full key contents you copied
-   - Mark it **Secure** so it's encrypted and hidden from build logs
+   - Name: `CERTIFICATE_PRIVATE_KEY_B64`
+   - Value: the single-line base64 text from step 2
+   - Mark it **Secret** so it's encrypted and hidden from build logs
    - Group: create/select a group named exactly **`ios_signing`** — that's
      what `codemagic.yaml` references under `environment.groups`
-5. Save. Delete the local `ios_distribution_private_key.pem` file once it's
-   safely stored in Codemagic — you don't need to keep a copy, and it's a
-   real credential like the `.p8` file.
+5. Save. `codemagic.yaml`'s "Decode certificate private key" step turns this
+   back into a real PEM file at build time and verifies it with
+   `openssl rsa -check` before any signing step touches it. Delete your
+   local copy of `key.pem` once the variable is saved — you don't need to
+   keep it, and it's a real credential like the `.p8` file.
 
 ## 7. Run the first build
 
