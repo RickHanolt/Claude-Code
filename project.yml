@@ -15,6 +15,14 @@ settings:
     VERSIONING_SYSTEM: apple-generic
     CURRENT_PROJECT_VERSION: "1"
     MARKETING_VERSION: "1.0"
+    # Manual signing is required for Codemagic's `xcode-project use-profiles`
+    # step to actually take effect. It injects a specific provisioning
+    # profile + certificate as build setting overrides, but Xcode only
+    # honors those when the target isn't set to resolve signing itself —
+    # left on Xcode's default "Automatic", `xcodebuild archive` tries to
+    # pick a profile interactively, which has no way to succeed in a
+    # headless CI shell and fails with a generic "Failed to archive" error.
+    CODE_SIGN_STYLE: Manual
 
 packages:
   SwiftSoup:
