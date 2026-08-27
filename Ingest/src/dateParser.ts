@@ -29,6 +29,13 @@ export function extractCandidateEvents(
   const candidates: CandidateEvent[] = [];
 
   for (const result of results) {
+    // A bare month reference with no day number ("September Schedule:")
+    // gets a defaulted day from chrono rather than a real one — confirmed
+    // live: "September Schedule:" parsed as September 1st, landing a
+    // nonexistent event on the calendar. isCertain("day") is false exactly
+    // when the day was inferred rather than present in the text.
+    if (!result.start.isCertain("day")) continue;
+
     const date = result.start.date();
     if (isSameCalendarDay(date, referenceDate)) continue;
 

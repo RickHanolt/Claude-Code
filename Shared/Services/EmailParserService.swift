@@ -36,6 +36,7 @@ struct EmailParserService {
         for match in matches {
             guard let date = match.date else { continue }
             guard !calendar.isDate(date, inSameDayAs: referenceDate) else { continue }
+            guard matchIncludesExplicitDay(match, in: bodyText) else { continue }
             guard seenStarts.insert(date.timeIntervalSince1970).inserted else { continue }
 
             let end = match.duration > 0 ? date.addingTimeInterval(match.duration) : nil
@@ -69,6 +70,17 @@ struct EmailParserService {
         let truncated = String(snippet.prefix(limit))
         let trimmed = truncated.lastIndex(of: " ").map { String(truncated[..<$0]) } ?? truncated
         return trimmed + "…"
+    }
+
+    /// `NSDataDetector` doesn't expose per-component certainty the way
+    /// chrono-node does (see `dateParser.ts`'s `isCertain("day")` check), so
+    /// this approximates "was an explicit day-of-month present" by checking
+    /// the matched text itself contains a digit — confirmed live: a bare
+    /// "September Schedule:" heading (no day number) got matched and
+    /// defaulted to the 1st, landing a nonexistent event on the calendar.
+    private func matchIncludesExplicitDay(_ match: NSTextCheckingResult, in text: String) -> Bool {
+        guard let range = Range(match.range, in: text) else { return true }
+        return text[range].rangeOfCharacter(from: .decimalDigits) != nil
     }
 
     /// Grabs a short window of context around the matched date so the
