@@ -39,9 +39,10 @@ export function extractCandidateEvents(
     const endDate = result.end ? result.end.date() : null;
     const notes = surroundingSnippet(bodyText, result.index, result.text.length);
     const trimmedSubject = subject.trim();
+    const fallbackTitle = trimmedSubject.length ? trimmedSubject : "Forwarded event";
 
     candidates.push({
-      title: trimmedSubject.length ? trimmedSubject : "Forwarded event",
+      title: eventTitle(notes, fallbackTitle),
       startDate: date.toISOString(),
       endDate: endDate ? endDate.toISOString() : null,
       notes,
@@ -49,6 +50,25 @@ export function extractCandidateEvents(
   }
 
   return candidates;
+}
+
+/**
+ * A single email often contains several distinct dates (a newsletter
+ * listing multiple events, say) — reusing the email subject as every
+ * candidate's title made them all show up identically in the calendar.
+ * The surrounding-text snippet is a much better per-event label when one's
+ * available; the subject is only a fallback for a match with no usable
+ * context. Mirrors `eventTitle` in the Swift version.
+ */
+function eventTitle(snippet: string | null, fallback: string): string {
+  if (!snippet) return fallback;
+  const limit = 60;
+  if (snippet.length <= limit) return snippet;
+
+  const truncated = snippet.slice(0, limit);
+  const spaceIdx = truncated.lastIndexOf(" ");
+  const trimmed = spaceIdx === -1 ? truncated : truncated.slice(0, spaceIdx);
+  return `${trimmed}…`;
 }
 
 function isSameCalendarDay(a: Date, b: Date): boolean {

@@ -129,8 +129,18 @@ When you add a school in the app you choose one or more sources:
   wired to update instead of insert.
 - Scraping selectors are per-school and manual; there's no auto-detection.
 - Email parsing is a date-detector heuristic (finds dates in forwarded text
-  and uses the email subject as the event title) — good enough to review and
-  confirm by hand, not fully automatic.
+  and titles each candidate from the surrounding snippet, falling back to
+  the email subject) — good enough to review and confirm by hand, not fully
+  automatic.
+- **No de-duplication between an email-parsed event and the same event
+  already on a school's ICS feed** — if a school both publishes a calendar
+  feed and sends a newsletter about the same event, confirming the
+  email-parsed candidate creates a second, separate calendar entry rather
+  than recognizing it as the ICS one and skipping it. Fixing this properly
+  needs fuzzy matching (similar date + overlapping/similar title across two
+  differently-worded sources, not just an exact id match like the existing
+  `externalID` de-dup), which is a real chunk of work on its own — flagged
+  here rather than built as part of this round.
 - `.eml` file attachments shared from Mail are read as raw text in the share
   extension; a proper MIME parser would improve extraction from HTML-heavy
   emails.

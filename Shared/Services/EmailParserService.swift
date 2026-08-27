@@ -40,10 +40,11 @@ struct EmailParserService {
 
             let end = match.duration > 0 ? date.addingTimeInterval(match.duration) : nil
             let snippet = surroundingSnippet(for: match, in: bodyText)
+            let fallbackTitle = subject.isEmpty ? "Forwarded event" : subject
 
             results.append(
                 ParsedCandidateEvent(
-                    title: subject.isEmpty ? "Forwarded event" : subject,
+                    title: eventTitle(from: snippet, fallback: fallbackTitle),
                     startDate: date,
                     endDate: end,
                     notes: snippet
@@ -52,6 +53,22 @@ struct EmailParserService {
         }
 
         return results
+    }
+
+    /// A single email often contains several distinct dates (a newsletter
+    /// listing multiple events, say) — reusing the email subject as every
+    /// candidate's title made them all show up identically in the calendar.
+    /// The surrounding-text snippet is a much better per-event label when
+    /// one's available; the subject is only a fallback for a match with no
+    /// usable context.
+    private func eventTitle(from snippet: String?, fallback: String) -> String {
+        guard let snippet, !snippet.isEmpty else { return fallback }
+        let limit = 60
+        guard snippet.count > limit else { return snippet }
+
+        let truncated = String(snippet.prefix(limit))
+        let trimmed = truncated.lastIndex(of: " ").map { String(truncated[..<$0]) } ?? truncated
+        return trimmed + "…"
     }
 
     /// Grabs a short window of context around the matched date so the
