@@ -8,12 +8,12 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "schoolsync_ingest"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "b11ef4bd-afa1-45a3-a98f-a1f35c1481fe"
 
 # ADMIN_TOKEN (used to provision new households) is a secret, not a var —
 # set it with `wrangler secret put ADMIN_TOKEN`, never commit it here.
 [vars]
-INGEST_DOMAIN = "mail.yourdomain.com"
+INGEST_DOMAIN = "schoolsync.link"
 
 # Inbound mail delivery itself is wired up in the Cloudflare dashboard
 # (Email Routing -> Routing rules -> Action "Send to Worker" -> this worker),
