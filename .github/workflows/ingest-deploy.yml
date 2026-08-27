@@ -31,7 +31,7 @@ jobs:
   # INGEST_BACKEND.md — so this job stays green before and after that setup.
   deploy:
     needs: typecheck
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:
