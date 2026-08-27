@@ -152,3 +152,19 @@ When you add a school in the app you choose one or more sources:
   auto-forward backend (Ingest/, see INGEST_BACKEND.md): the app only checks
   for new auto-forwarded emails when you tap Sync Now or "Check for
   auto-forwarded emails" in Settings, not automatically in the background.
+- **Fully automatic email-to-calendar, no manual review step** — auto-
+  forwarded emails currently still need a human to open "Check for
+  auto-forwarded emails," confirm which candidate dates are real, and assign
+  kid/school before anything reaches the calendar. Kid/school assignment
+  could be made automatic today (each school already maps to exactly one
+  kid, so once a sender is known to belong to a school, the rest follows) —
+  the harder part is skipping the human date-review step, since the
+  heuristic still produces real false positives (newsletter metadata,
+  forwarded-header artifacts) that the review screen exists to catch.
+  One promising path that avoids both this and `BGAppRefreshTask`'s
+  unreliable iOS scheduling: have the Worker serve its own dynamically
+  generated ICS feed of confirmed events per household, and subscribe to it
+  directly in iOS Calendar — the same mechanism a school's own ICS feed
+  already uses, refreshed on Apple's own schedule, no app open required.
+  That does mean giving up the in-app review step for that path entirely, so
+  it's worth deciding deliberately rather than defaulting into it.
