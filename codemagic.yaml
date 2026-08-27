@@ -88,16 +88,21 @@ workflows:
       - name: Set up code signing settings on the generated Xcode project
         script: xcode-project use-profiles
 
-      # get-latest-app-store-build-number only counts builds that went
-      # through a full App Store release, which we've never done — it kept
-      # returning 0, so every upload got build number 1 again, and Apple
-      # rejects re-using a build number even from a failed/incomplete
-      # upload. get-latest-build-number checks both TestFlight and App
-      # Store uploads, so it actually reflects what Apple has on record.
-      - name: Increment build number to the next TestFlight build
-        script: |
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-build-number "$BUNDLE_ID_APP")
-          agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
+      # Previously queried `app-store-connect get-latest-build-number` and
+      # incremented that — first attempt (get-latest-app-store-build-number,
+      # which only counts full App Store releases) always returned 0 and
+      # collided with an already-uploaded build 1; switching to
+      # get-latest-build-number fixed it once, but it recurred on a later
+      # build (same "previousBundleVersion: 1" collision), meaning that
+      # query isn't a reliable source of truth here either — and a `$(...)`
+      # command substitution failing silently just leaves the bash
+      # arithmetic treating it as 0, so a transient query failure looks
+      # identical to "no prior builds exist" with no error printed.
+      # A Unix timestamp sidesteps the whole class of bug: it's always
+      # greater than any previous build number by construction, so it can
+      # never collide, and never depends on Apple's API answering correctly.
+      - name: Set build number to a Unix timestamp
+        script: agvtool new-version -all "$(date +%s)"
 
       # --verbose: without it, a failed archive only prints a terse "Failed
       # to archive ..." with no indication of why. With it, the real
