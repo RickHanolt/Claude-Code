@@ -118,7 +118,15 @@ workflows:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
 
+    # submit_to_testflight submits the build for Apple's Beta App Review,
+    # which is only required for External testing groups — Internal testers
+    # (what we use here) get access automatically the moment Apple finishes
+    # processing a build, no review needed. Leaving it on caused an upload
+    # that succeeded (built, signed, uploaded, processed fine) to still
+    # report as failed, because Apple rejected the review submission with
+    # "Another build is in review" (a leftover review submission from an
+    # earlier attempt, one train can only have one build in review at once).
+    # Dropping it removes that failure mode entirely for this use case.
     publishing:
       app_store_connect:
         auth: integration
-        submit_to_testflight: true
