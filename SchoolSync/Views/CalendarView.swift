@@ -37,15 +37,26 @@ struct CalendarView: View {
                         description: Text("Add a school with an ICS feed or scrape config, then tap Sync.")
                     )
                 } else {
+                    // Plain style + a shared listRowBackground across a
+                    // day's label and its events (rather than a true Section
+                    // header, which can't take a row background) is what
+                    // makes each day read as one solid banded box instead of
+                    // the default grouped-list card look.
                     List {
-                        ForEach(upcomingByDay, id: \.day) { section in
-                            Section(section.day.formatted(.dateTime.weekday(.wide).month().day())) {
+                        ForEach(Array(upcomingByDay.enumerated()), id: \.element.day) { index, section in
+                            Section {
+                                Text(section.day.formatted(.dateTime.weekday(.wide).month().day()))
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(.secondary)
+                                    .listRowBackground(dayBandColor(for: index))
+
                                 ForEach(section.events) { event in
                                     NavigationLink {
                                         EditEventView(event: event, kid: kidsByID[event.kidID])
                                     } label: {
                                         eventRow(event)
                                     }
+                                    .listRowBackground(dayBandColor(for: index))
                                     .swipeActions(edge: .trailing) {
                                         Button(role: .destructive) {
                                             delete(event)
@@ -57,6 +68,7 @@ struct CalendarView: View {
                             }
                         }
                     }
+                    .listStyle(.plain)
                 }
             }
             .navigationTitle("Calendar")
@@ -87,6 +99,13 @@ struct CalendarView: View {
                 }
             }
         }
+    }
+
+    /// `Color.clear` on the "off" band lets the list's own background show
+    /// through, so it adapts to dark mode automatically instead of a
+    /// hardcoded white looking wrong there.
+    private func dayBandColor(for dayIndex: Int) -> Color {
+        dayIndex.isMultiple(of: 2) ? Color.accentColor.opacity(0.12) : Color.clear
     }
 
     private func eventRow(_ event: SchoolEventRecord) -> some View {
