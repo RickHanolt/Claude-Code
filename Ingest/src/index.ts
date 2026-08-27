@@ -45,7 +45,8 @@ async function authenticateHousehold(request: Request, env: Env): Promise<Househ
  * INGEST_BACKEND.md). The API key is returned exactly once; only its hash
  * is ever persisted. */
 async function handleProvision(request: Request, env: Env): Promise<Response> {
-  if (request.headers.get("authorization") !== `Bearer ${env.ADMIN_TOKEN}`) {
+  const header = (request.headers.get("authorization") ?? "").trim();
+  if (header !== `Bearer ${env.ADMIN_TOKEN.trim()}`) {
     return json({ error: "unauthorized" }, 401);
   }
 

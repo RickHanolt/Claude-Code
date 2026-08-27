@@ -73,4 +73,4 @@ jobs:
         if: steps.check.outputs.skip == 'false' && env.INGEST_ADMIN_TOKEN != ''
         env:
           INGEST_ADMIN_TOKEN: ${{ secrets.INGEST_ADMIN_TOKEN }}
-        run: echo "$INGEST_ADMIN_TOKEN" | npx wrangler secret put ADMIN_TOKEN
+        run: printf '%s' "$INGEST_ADMIN_TOKEN" | npx wrangler secret put ADMIN_TOKEN
