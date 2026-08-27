@@ -10,7 +10,11 @@ struct EventStore {
     let modelContext: ModelContext
 
     /// Inserts new events and updates existing ones (matched by
-    /// `externalID`), so re-running a sync doesn't duplicate anything.
+    /// `externalID`), so re-running a sync doesn't duplicate anything. A
+    /// record the user has edited or deleted in-app is left alone — see the
+    /// doc comments on `SchoolEventRecord.isUserEdited`/`isDeletedByUser` —
+    /// so a source that still serves the old data can't silently undo a
+    /// manual fix or resurrect something the user removed.
     @discardableResult
     func upsert(_ dtos: [SchoolEventDTO]) throws -> Int {
         var changed = 0
@@ -20,6 +24,7 @@ struct EventStore {
                 predicate: #Predicate { $0.externalID == externalID }
             )
             if let existing = try modelContext.fetch(descriptor).first {
+                guard !existing.isDeletedByUser, !existing.isUserEdited else { continue }
                 existing.update(from: dto)
             } else {
                 modelContext.insert(SchoolEventRecord(dto: dto))
@@ -88,9 +93,12 @@ struct EventStore {
         try modelContext.fetch(FetchDescriptor<SchoolRecord>(sortBy: [SortDescriptor(\.name)]))
     }
 
+    /// Excludes tombstoned events — feeds `CalendarSyncService.sync`, and
+    /// including a deleted-by-user record here would resurrect it in
+    /// EventKit on the very next full sync.
     func fetchEvents(for kidID: UUID) throws -> [SchoolEventRecord] {
         let descriptor = FetchDescriptor<SchoolEventRecord>(
-            predicate: #Predicate { $0.kidID == kidID },
+            predicate: #Predicate { $0.kidID == kidID && !$0.isDeletedByUser },
             sortBy: [SortDescriptor(\.startDate)]
         )
         return try modelContext.fetch(descriptor)

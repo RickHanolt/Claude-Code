@@ -3,7 +3,8 @@ import SwiftData
 
 struct CalendarView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \SchoolEventRecord.startDate) private var events: [SchoolEventRecord]
+    @Query(filter: #Predicate<SchoolEventRecord> { !$0.isDeletedByUser }, sort: \SchoolEventRecord.startDate)
+    private var events: [SchoolEventRecord]
     @Query(sort: \KidRecord.name) private var kids: [KidRecord]
     @Query(sort: \SchoolRecord.name) private var schools: [SchoolRecord]
 
@@ -40,7 +41,18 @@ struct CalendarView: View {
                         ForEach(upcomingByDay, id: \.day) { section in
                             Section(section.day.formatted(.dateTime.weekday(.wide).month().day())) {
                                 ForEach(section.events) { event in
-                                    eventRow(event)
+                                    NavigationLink {
+                                        EditEventView(event: event, kid: kidsByID[event.kidID])
+                                    } label: {
+                                        eventRow(event)
+                                    }
+                                    .swipeActions(edge: .trailing) {
+                                        Button(role: .destructive) {
+                                            delete(event)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -102,6 +114,19 @@ struct CalendarView: View {
         }
         if let location = event.location, !location.isEmpty { parts.append(location) }
         return parts.joined(separator: " · ")
+    }
+
+    /// Removes the underlying Calendar-app event (if this record ever made
+    /// it to EventKit) and tombstones the local record so a future sync
+    /// from the same source doesn't bring it back — see
+    /// `SchoolEventRecord.isDeletedByUser`.
+    private func delete(_ event: SchoolEventRecord) {
+        if let identifier = event.calendarSyncIdentifier {
+            try? CalendarSyncService().delete(eventIdentifier: identifier)
+        }
+        event.isDeletedByUser = true
+        event.calendarSyncIdentifier = nil
+        try? modelContext.save()
     }
 
     private func sync() async {

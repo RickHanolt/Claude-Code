@@ -22,6 +22,18 @@ final class SchoolEventRecord {
     /// re-searching by tag every time.
     var calendarSyncIdentifier: String?
 
+    /// Set when the user edits this event in-app. `EventStore.upsert` skips
+    /// overwriting an edited record's fields from its source (ICS/scrape/
+    /// email) on the next sync, so a manual fix isn't silently clobbered.
+    var isUserEdited: Bool = false
+
+    /// A tombstone rather than an actual delete: removing the SwiftData row
+    /// outright would let the next sync from the same source (which has no
+    /// idea the user deleted it) re-insert it right back. `EventStore.upsert`
+    /// skips re-creating a tombstoned record, and `CalendarView` filters
+    /// tombstoned events out of its query.
+    var isDeletedByUser: Bool = false
+
     var source: EventSourceType {
         get { EventSourceType(rawValue: sourceRaw) ?? .icsFeed }
         set { sourceRaw = newValue.rawValue }

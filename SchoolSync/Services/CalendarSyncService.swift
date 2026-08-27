@@ -82,6 +82,14 @@ final class CalendarSyncService {
         try modelContext.save()
     }
 
+    /// Removes the EventKit event backing a deleted `SchoolEventRecord` so
+    /// it doesn't linger as a ghost in the Calendar app after the user
+    /// deletes it in SchoolSync.
+    func delete(eventIdentifier: String) throws {
+        guard let event = store.event(withIdentifier: eventIdentifier) else { return }
+        try store.remove(event, span: .thisEvent)
+    }
+
     private func findExistingEvent(tag: String, calendar: EKCalendar, near date: Date) -> EKEvent? {
         let window: TimeInterval = 60 * 60 * 24 * 400
         let start = date.addingTimeInterval(-window)
