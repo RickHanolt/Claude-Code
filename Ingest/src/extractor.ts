@@ -26,11 +26,15 @@ const ExtractedEvent = z.object({
     ),
   startDate: z
     .string()
-    .describe("ISO 8601. Include a time only if the email states one."),
+    .describe(
+      "ISO 8601. Use YYYY-MM-DD for an all-day event, or YYYY-MM-DDTHH:MM:SS when the email states a time."
+    ),
   endDate: z
     .string()
     .nullable()
-    .describe("ISO 8601 end time, or null for an all-day or open-ended event."),
+    .describe(
+      "ISO 8601 end time (YYYY-MM-DDTHH:MM:SS), or null for an all-day or open-ended event."
+    ),
   notes: z
     .string()
     .nullable()
@@ -119,6 +123,64 @@ function prepareBody(bodyText: string): string {
 const THINKING_BUDGET_TOKENS = 2000;
 const MAX_TOKENS = 8000;
 
+/** Rewrites whatever ISO-8601 shape the model produced into the one strict
+ * form the app can actually decode.
+ *
+ * The iOS client decodes with `JSONDecoder.dateDecodingStrategy = .iso8601`,
+ * which is `ISO8601DateFormatter` in `.withInternetDateTime` mode: it requires
+ * a time AND an explicit offset. The previous `chrono-node` parser only ever
+ * emitted `date.toISOString()`, so this never came up — then the schema here
+ * told the model "include a time only if the email states one", it duly
+ * returned a bare `2026-09-09` for an all-day event, and the app failed the
+ * whole response with "The data couldn't be read because it isn't in the
+ * correct format." A loosened producer against an unchanged strict consumer.
+ *
+ * Two shapes get repaired:
+ *
+ * - Date-only (`2026-09-09`) is anchored at **noon** UTC, not midnight. Naive
+ *   midnight renders as the *previous day* in every negative-offset timezone,
+ *   so an all-day event on the 9th would show up on the 8th here. Noon is also
+ *   what chrono produced for a date with no stated time (its implied hour),
+ *   so this preserves the behavior that was already working rather than
+ *   inventing one.
+ * - A datetime with no offset (`2026-09-09T09:00:00`) is read as UTC, again
+ *   matching what the old parser did in this Worker.
+ *
+ * KNOWN LIMITATION, inherited rather than introduced: a stated clock time is
+ * the school's local time, and nothing here knows what timezone that is, so
+ * "9:00 AM" is stored as 09:00Z and displays shifted. Fixing it properly means
+ * storing a timezone per household — that belongs with the per-kid settings
+ * work, not in a crash fix.
+ *
+ * Returns null for anything unparseable; the caller drops those events rather
+ * than storing a value that will break decoding again downstream. */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const NAIVE_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?$/;
+
+export function normalizeISODate(value: string | null): string | null {
+  if (value === null) return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const candidate = DATE_ONLY.test(trimmed)
+    ? `${trimmed}T12:00:00Z`
+    : NAIVE_DATETIME.test(trimmed)
+      ? `${trimmed}Z`
+      : trimmed;
+
+  const parsed = new Date(candidate);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  // Milliseconds are dropped deliberately. `.withInternetDateTime`, the mode
+  // the app's decoder uses, rejects fractional seconds unless
+  // `.withFractionalSeconds` is also set. Recent Foundation is lenient about
+  // it — the emails' received_at carries `.000Z` and decodes fine today — but
+  // "works because the platform is currently forgiving" is not a property
+  // worth depending on, and this form is canonical RFC 3339 either way.
+  return parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 /**
  * Throws on API failure rather than returning empty — the caller distinguishes
  * "the model found nothing" (a legitimate empty list, common for a newsletter
@@ -162,5 +224,21 @@ export async function extractEvents(
     throw new Error(`Extraction returned no parseable output (stop_reason: ${message.stop_reason})`);
   }
 
-  return message.parsed_output.events;
+  // Normalize before anything is stored. Doing it here rather than at the
+  // insert keeps the invariant with the schema it belongs to: everything this
+  // function returns is decodable by the app.
+  const normalized: ExtractedEvent[] = [];
+
+  for (const event of message.parsed_output.events) {
+    const startDate = normalizeISODate(event.startDate);
+
+    if (!startDate) {
+      console.warn(`Dropping event with unparseable startDate: ${JSON.stringify(event.startDate)}`);
+      continue;
+    }
+
+    normalized.push({ ...event, startDate, endDate: normalizeISODate(event.endDate) });
+  }
+
+  return normalized;
 }
