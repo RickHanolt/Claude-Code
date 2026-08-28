@@ -8,7 +8,7 @@
  * same day. That failure is invisible, and an event silently missing from a
  * parent's calendar is the worst outcome this app has.
  */
-import { contentFingerprint, isDuplicateEvent } from "../src/dedupe";
+import { collapseDuplicates, contentFingerprint, isDuplicateEvent } from "../src/dedupe";
 
 let failures = 0;
 
@@ -59,7 +59,7 @@ check(
 );
 
 check(
-  "reworded, more specific title on the same day is a duplicate",
+  "reworded, more specific title at the same instant is a duplicate",
   isDuplicateEvent(
     { title: "Golf Program Info Session in the School Library", startDate: "2026-09-03T17:00:00Z" },
     existing
@@ -69,7 +69,15 @@ check(
 
 check(
   "punctuation and case differences are a duplicate",
-  isDuplicateEvent({ title: "cheer practice!", startDate: "2026-08-27T09:00:00Z" }, existing),
+  isDuplicateEvent({ title: "cheer practice!", startDate: "2026-08-27T16:30:00Z" }, existing),
+  true
+);
+
+// Rows written before date normalization carry milliseconds; same instant,
+// different spelling.
+check(
+  "millisecond spelling of the same instant is a duplicate",
+  isDuplicateEvent({ title: "Cheer Practice", startDate: "2026-08-27T16:30:00.000Z" }, existing),
   true
 );
 
@@ -81,10 +89,53 @@ check(
   false
 );
 
+// The case a real newsletter exposed, and the reason matching is keyed on the
+// start instant rather than the calendar day. A father-son event ran at 8:00
+// for grades 1-4 and 9:00 for grades 5-7; a clinic ran at 10:00 and 11:00 the
+// same day. Identical titles, same day, genuinely separate sessions a parent
+// has to show up for. Day-granularity matching silently ate one of each pair.
+const sessions = [
+  { title: "Father-Son Retreat", startDate: "2026-09-13T13:00:00Z" },
+  { title: "Basketball Skills Clinic", startDate: "2026-09-16T15:00:00Z" },
+];
+
+check(
+  "a second session later the same day is kept",
+  isDuplicateEvent({ title: "Father-Son Retreat", startDate: "2026-09-13T14:00:00Z" }, sessions),
+  false
+);
+
+check(
+  "a second clinic hour the same day is kept",
+  isDuplicateEvent({ title: "Basketball Skills Clinic", startDate: "2026-09-16T16:00:00Z" }, sessions),
+  false
+);
+
 check(
   "a different event on the same day is kept",
   isDuplicateEvent({ title: "Dads Social Hour", startDate: "2026-09-03T19:00:00Z" }, existing),
   false
+);
+
+// End to end on the shape actually observed: two extraction runs over one
+// newsletter, notes reordered, plus two real sessions an hour apart.
+const observed = [
+  { title: "Basketball Skills Clinic", startDate: "2026-09-16T15:00:00Z" },
+  { title: "Basketball Skills Clinic at SMA", startDate: "2026-09-16T15:00:00Z" },
+  { title: "Basketball Skills Clinic", startDate: "2026-09-16T16:00:00Z" },
+  { title: "Basketball Skills Clinic at SMA", startDate: "2026-09-16T16:00:00Z" },
+];
+
+check("collapse keeps both real sessions", collapseDuplicates(observed).length, 2);
+check(
+  "collapse keeps the 10:00 session",
+  collapseDuplicates(observed)[0].startDate,
+  "2026-09-16T15:00:00Z"
+);
+check(
+  "collapse keeps the 11:00 session",
+  collapseDuplicates(observed)[1].startDate,
+  "2026-09-16T16:00:00Z"
 );
 
 // The containment-scoring risk, spelled out: "Picture Day" is wholly contained

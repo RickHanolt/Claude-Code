@@ -1,7 +1,7 @@
 import PostalMime from "postal-mime";
 import { extractEvents } from "./extractor";
 import { randomToken, sha256Hex } from "./auth";
-import { contentFingerprint, isDuplicateEvent, type ExistingEvent } from "./dedupe";
+import { collapseDuplicates, contentFingerprint, isDuplicateEvent, type ExistingEvent } from "./dedupe";
 
 export interface Env {
   DB: D1Database;
@@ -270,7 +270,16 @@ async function handlePending(request: Request, env: Env, ctx: ExecutionContext):
     .bind(household.id)
     .all();
 
-  return json({ emails: emails.results, events: events.results });
+  // Collapse duplicates on the way out as well as on the way in. The rows
+  // already queued were written before any of this matching existed and can't
+  // be repaired by SQL — the duplicate pairs differ in wording (two extraction
+  // runs over one newsletter produced "Free for SMA students. Coach Craig
+  // Madzinski." and "Coach Craig Madzinski. Free for SMA students."), and
+  // SQLite has no fuzzy comparison. Filtering here fixes what's queued without
+  // deleting anything, so a matching mistake hides a row rather than losing it.
+  const events_ = (events.results ?? []) as Array<{ title: string; startDate: string }>;
+
+  return json({ emails: emails.results, events: collapseDuplicates(events_) });
 }
 
 /** Marks emails/events as consumed once the app has pulled them into its
