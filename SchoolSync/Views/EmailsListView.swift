@@ -15,7 +15,7 @@ struct EmailsListView: View {
     private var schoolsByID: [UUID: SchoolRecord] { Dictionary(uniqueKeysWithValues: schools.map { ($0.id, $0) }) }
 
     var body: some View {
-        NavigationStack {
+        Group {
             Group {
                 if emails.isEmpty {
                     ContentUnavailableView(

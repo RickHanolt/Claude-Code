@@ -58,6 +58,22 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Kids, Schools and Emails were tabs of equal standing with
+                // the calendar. They're setup and history — touched when
+                // something changes, not on a school morning — so they live
+                // here now rather than taking permanent space in the tab bar.
+                Section("Manage") {
+                    NavigationLink { KidsListView() } label: {
+                        Label("Kids", systemImage: "person.2")
+                    }
+                    NavigationLink { SchoolsListView() } label: {
+                        Label("Schools", systemImage: "building.columns")
+                    }
+                    NavigationLink { EmailsListView() } label: {
+                        Label("Emails", systemImage: "envelope")
+                    }
+                }
+
                 Section("Calendar Access") {
                     HStack {
                         Text("Status")

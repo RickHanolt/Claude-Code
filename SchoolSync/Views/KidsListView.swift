@@ -15,7 +15,7 @@ struct KidsListView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        Group {
             Group {
                 if kids.isEmpty {
                     ContentUnavailableView(

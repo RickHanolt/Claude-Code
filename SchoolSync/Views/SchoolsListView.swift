@@ -10,7 +10,7 @@ struct SchoolsListView: View {
     private var kidsByID: [UUID: KidRecord] { Dictionary(uniqueKeysWithValues: kids.map { ($0.id, $0) }) }
 
     var body: some View {
-        NavigationStack {
+        Group {
             Group {
                 if kids.isEmpty {
                     ContentUnavailableView(
