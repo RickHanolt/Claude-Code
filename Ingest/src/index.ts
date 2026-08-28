@@ -345,6 +345,17 @@ async function handleAck(request: Request, env: Env): Promise<Response> {
   return json({ ok: true });
 }
 
+/** The feed the debug endpoint looks at when asked for nothing in particular:
+ * Teddy's school, from today through a week out. Dates are computed rather
+ * than fixed so this stays useful next term instead of quietly returning an
+ * empty range. */
+function defaultMealViewerURL(): string {
+  const day = (offset: number) =>
+    new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+
+  return `https://api.mealviewer.com/api/v4/school/610138-51145/${day(0)}/${day(7)}/`;
+}
+
 /** Fetches a small slice of an upstream feed, so a parser can be written
  * against real structure instead of a guess.
  *
@@ -366,8 +377,12 @@ async function handleDebugFetch(request: Request, env: Env): Promise<Response> {
     return json({ error: "unauthorized" }, 401);
   }
 
-  const target = new URL(request.url).searchParams.get("url");
-  if (!target) return json({ error: "missing url parameter" }, 400);
+  // Defaulted rather than required. Passing a URL as a query parameter inside
+  // another URL is exactly the sort of step that breaks in a browser-based HTTP
+  // client — the first attempt came back "missing url parameter" because the
+  // client dropped everything after the "?". The feed this exists to inspect is
+  // known, so asking for it should be one request with nothing to encode.
+  const target = new URL(request.url).searchParams.get("url") ?? defaultMealViewerURL();
 
   let parsed: URL;
   try {
@@ -384,6 +399,7 @@ async function handleDebugFetch(request: Request, env: Env): Promise<Response> {
   const body = await upstream.text();
 
   return json({
+    fetched: parsed.toString(),
     status: upstream.status,
     contentType: upstream.headers.get("content-type"),
     totalLength: body.length,
