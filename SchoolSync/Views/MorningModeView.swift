@@ -132,7 +132,21 @@ private struct KidPanel: View {
                 FieldRow(field: plan.clothing, accent: accent)
             }
 
-            if !plan.reminders.isEmpty || !events.isEmpty {
+            if plan.reminders.isEmpty && events.isEmpty {
+                // Say it rather than leaving a gap. An empty panel is
+                // ambiguous — it could mean "nothing unusual" or "this failed
+                // to load", and at 7am you shouldn't have to work out which.
+                // Silence only functions as a signal when it's distinguishable
+                // from a bug.
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Text("Nothing unusual today")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            } else {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(plan.reminders, id: \.value) { reminder in
                         ReminderRow(text: reminder.value, isException: reminder.isException, accent: accent)
@@ -150,6 +164,12 @@ private struct KidPanel: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
+        .background(
+            // A faint tint of the kid's own colour. Without a boundary the
+            // panel's unused half-screen reads as emptiness; with one it reads
+            // as this kid's area, which is what it is.
+            accent.opacity(0.06)
+        )
     }
 
     private func eventLabel(_ event: SchoolEventRecord) -> String {
