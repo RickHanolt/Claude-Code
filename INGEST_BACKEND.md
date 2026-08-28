@@ -79,9 +79,27 @@ newsletter, produced 22 candidates from one email — duplicates of the same
 listing, sentence fragments as titles, and two entries dated 2014 because a
 comma-separated day list read as a year.
 
-Billing is pay-as-you-go with no monthly fee: you're charged per token used,
-which at a two-kid household's volume runs a few cents to a quarter a month.
+Billing is pay-as-you-go with no monthly fee: you're charged per token used.
 Most accounts need a small one-time deposit to activate billing.
+
+An earlier version of this file estimated a few cents a month. That was wrong
+by roughly 60x, and it's worth knowing why. The extraction call didn't set
+`thinking`, so Opus reasoned adaptively on every email and billed that
+reasoning as output tokens, bounded only by a 16,000-token `max_tokens`. Two
+newsletters cost $1.40. Three things changed as a result, all in
+`Ingest/src/extractor.ts` and `Ingest/src/index.ts`:
+
+- the thinking budget is capped explicitly (2,000 tokens) instead of adaptive;
+- `max_tokens` dropped to 8,000, and the email body is cleaned and capped at
+  60,000 characters, so a forwarded reply chain can't balloon the input;
+- one email is handed to the model at most three times. Before, a
+  deterministically-failing email was retried on every poll forever, billing a
+  call each time.
+
+Real token counts are now logged on every extraction. Run `npx wrangler tail`
+in `Ingest/` while a forward comes in and you'll see
+`Extraction usage: input=… output=…` — measure your own volume there rather
+than trusting an estimate in a README.
 
 The key is optional in the sense that nothing breaks without it — the Worker
 still receives and stores every email, they still appear in the Emails tab,

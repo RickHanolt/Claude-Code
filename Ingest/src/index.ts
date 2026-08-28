@@ -70,6 +70,13 @@ async function handleProvision(request: Request, env: Env): Promise<Response> {
   });
 }
 
+/** How many times one email may be handed to the model before we stop paying
+ * to retry it. Counted at claim time, so a pass killed mid-call counts too.
+ * Three is enough to ride out a rate limit or a deploy, and small enough that
+ * a deterministically-failing email costs three calls, not one per poll
+ * forever. */
+const MAX_EXTRACTION_ATTEMPTS = 3;
+
 /** Extracts emails still marked pending.
  *
  * ALWAYS run this via `ctx.waitUntil(...)`, never awaited inside a request.
@@ -101,12 +108,13 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
     `SELECT id, subject, body_text as bodyText, received_at as receivedAt
      FROM forwarded_emails
      WHERE household_id = ?
+       AND extraction_attempts < ?
        AND (extraction_status = 'pending'
             OR (extraction_status = 'processing' AND (extracted_at IS NULL OR extracted_at < ?)))
      ORDER BY received_at ASC
      LIMIT 3`
   )
-    .bind(householdID, staleClaimCutoff)
+    .bind(householdID, MAX_EXTRACTION_ATTEMPTS, staleClaimCutoff)
     .all<{ id: string; subject: string; bodyText: string; receivedAt: string }>();
 
   for (const email of pending.results ?? []) {
@@ -119,12 +127,16 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
     // detected and reclaimed above; on success it's overwritten with the
     // completion time. Read it as "last touched".
     const claim = await env.DB.prepare(
-      `UPDATE forwarded_emails SET extraction_status = 'processing', extracted_at = ?
+      `UPDATE forwarded_emails
+       SET extraction_status = 'processing',
+           extracted_at = ?,
+           extraction_attempts = extraction_attempts + 1
        WHERE id = ?
+         AND extraction_attempts < ?
          AND (extraction_status = 'pending'
               OR (extraction_status = 'processing' AND (extracted_at IS NULL OR extracted_at < ?)))`
     )
-      .bind(new Date().toISOString(), email.id, staleClaimCutoff)
+      .bind(new Date().toISOString(), email.id, MAX_EXTRACTION_ATTEMPTS, staleClaimCutoff)
       .run();
 
     if (claim.meta.changes !== 1) continue;
@@ -168,11 +180,18 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
       // Release the claim so a later pass retries this email. Leaving it
       // 'processing' would strand it forever, which is how a transient API
       // error turns into an email that silently never gets its events.
+      //
+      // Once the attempt cap is reached the row goes to 'failed' instead and
+      // stops being retried. The email itself is still returned by /v1/pending
+      // — nothing is lost, it just arrives without events — and 'failed' says
+      // so explicitly rather than looking like "no dates in this one".
       console.error(`Extraction failed for email ${email.id}:`, error);
       await env.DB.prepare(
-        "UPDATE forwarded_emails SET extraction_status = 'pending' WHERE id = ?"
+        `UPDATE forwarded_emails
+         SET extraction_status = CASE WHEN extraction_attempts >= ? THEN 'failed' ELSE 'pending' END
+         WHERE id = ?`
       )
-        .bind(email.id)
+        .bind(MAX_EXTRACTION_ATTEMPTS, email.id)
         .run();
     }
   }

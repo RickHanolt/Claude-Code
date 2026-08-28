@@ -1,0 +1,14 @@
+-- Bounds what a single bad email can cost.
+--
+-- A failed extraction releases the row back to 'pending' so a later pass
+-- retries it, and extraction is triggered by every poll as well as by mail
+-- arrival. For a transient API error that is exactly right. For an email that
+-- fails *deterministically* — a body the model can't fit, a permanently
+-- rejected request — it is an unbounded loop that bills an Opus call every
+-- time the app checks for mail, with nothing in the app to show for it.
+--
+-- Attempts are counted at claim time rather than on failure, so a pass that is
+-- killed mid-call (waitUntil work can be terminated by the platform, and never
+-- reaches the catch) is counted too. Without that, a row that dies mid-call is
+-- reclaimed by the stale-claim path forever.
+ALTER TABLE forwarded_emails ADD COLUMN extraction_attempts INTEGER NOT NULL DEFAULT 0;

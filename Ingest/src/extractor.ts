@@ -74,6 +74,51 @@ Rules:
 - If the email contains no real dated events, return an empty list. That is a valid and common answer.`;
 }
 
+/** A forwarded newsletter routinely arrives twice over (the original plus the
+ * forward) and carries entity noise from the HTML strip in `index.ts`. None of
+ * that adds information, but all of it is billed as input tokens, so it gets
+ * cleaned before the call.
+ *
+ * The character cap is a cost fuse, not a quality decision: anything past it is
+ * a digest or a long reply chain, and truncating is a better failure mode than
+ * an unbounded bill. */
+const MAX_BODY_CHARS = 60_000;
+
+function prepareBody(bodyText: string): string {
+  const cleaned = bodyText
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/[ \t\u00a0]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (cleaned.length <= MAX_BODY_CHARS) return cleaned;
+
+  console.warn(`Email body truncated from ${cleaned.length} to ${MAX_BODY_CHARS} chars before extraction.`);
+  return cleaned.slice(0, MAX_BODY_CHARS);
+}
+
+/** Bounded reasoning instead of the adaptive default.
+ *
+ * The first live extractions cost ~$1.40 across a couple of attempts, roughly
+ * 60x the estimate, because `thinking` was omitted here. Opus 5 then reasons
+ * adaptively and bills it as output at Opus output rates, with nothing but
+ * `max_tokens` (16000 at the time) as a ceiling.
+ *
+ * Deduplicating an event that appears in both a summary list and a detail
+ * paragraph, and resolving a bare "Sept. 9" against the received date, do
+ * genuinely benefit from reasoning — so this caps the budget rather than
+ * switching thinking off.
+ *
+ * `max_tokens` must stay comfortably above the budget. If thinking crowds out
+ * the JSON the response truncates, `parsed_output` comes back null, and the
+ * email gets retried — paying twice for the same email is exactly the failure
+ * this is meant to prevent. */
+const THINKING_BUDGET_TOKENS = 2000;
+const MAX_TOKENS = 8000;
+
 /**
  * Throws on API failure rather than returning empty — the caller distinguishes
  * "the model found nothing" (a legitimate empty list, common for a newsletter
@@ -86,20 +131,35 @@ export async function extractEvents(
   bodyText: string,
   receivedAt: Date = new Date()
 ): Promise<ExtractedEvent[]> {
-  const client = new Anthropic({ apiKey });
+  // maxRetries is explicit because the SDK's default of 2 sits *inside* an
+  // outer retry: a failed extraction releases the row back to pending and a
+  // later pass tries it again. Left at the default, one consistently bad email
+  // could bill three model calls per pass.
+  const client = new Anthropic({ apiKey, maxRetries: 1 });
 
   const message = await client.beta.messages.parse({
     model: "claude-opus-5",
-    max_tokens: 16000,
-    messages: [{ role: "user", content: buildPrompt(subject, bodyText, receivedAt) }],
+    max_tokens: MAX_TOKENS,
+    thinking: { type: "enabled", budget_tokens: THINKING_BUDGET_TOKENS },
+    messages: [
+      { role: "user", content: buildPrompt(subject, prepareBody(bodyText), receivedAt) },
+    ],
     output_format: betaZodOutputFormat(Extraction),
   });
+
+  // Logged on every call so cost is something we measure in `wrangler tail`
+  // rather than estimate. The absence of this number is why a 60x overrun was
+  // only visible on the billing page.
+  console.log(
+    `Extraction usage: input=${message.usage.input_tokens} output=${message.usage.output_tokens} ` +
+      `stop=${message.stop_reason} subject="${subject.slice(0, 60)}"`
+  );
 
   // `parsed_output` is null when the response didn't satisfy the schema.
   // Treating that as a failure (not an empty result) keeps the email queued
   // for retry rather than silently recording zero events.
   if (!message.parsed_output) {
-    throw new Error("Extraction returned no parseable output");
+    throw new Error(`Extraction returned no parseable output (stop_reason: ${message.stop_reason})`);
   }
 
   return message.parsed_output.events;
