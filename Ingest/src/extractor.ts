@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import { attachmentBlocks, type StoredAttachment } from "./attachments";
 
 /**
  * Replaces the previous `chrono-node` date-detector heuristic (`dateParser.ts`).
@@ -75,7 +76,11 @@ Rules:
 - Title the event as a parent would say it. Do not use the email subject as a title, and do not copy a fragment of surrounding text.
 - Set a time only when the email gives one; otherwise leave endDate null so it reads as all-day.
 - Put location and useful detail in notes. Null if there is nothing worth keeping.
-- If the email contains no real dated events, return an empty list. That is a valid and common answer.`;
+- If the email contains no real dated events, return an empty list. That is a valid and common answer.
+- Any attached calendars, flyers or schedules are part of this email. Read every date in them, not just the ones repeated in the body — a year-at-a-glance calendar listing sixty dates should produce sixty entries.
+- A date range in an attachment ("3/25-4/2 Easter Break", "23-27 Thanksgiving Break") is ONE entry spanning it, not one per day.
+- An attachment may state a month and year only in a column or section heading. Apply that heading to every date beneath it.
+- An entry with no resolvable date ("Talent Show (TBD)") is not an event. Skip it.`;
 }
 
 /** A forwarded newsletter routinely arrives twice over (the original plus the
@@ -121,7 +126,14 @@ function prepareBody(bodyText: string): string {
  * email gets retried — paying twice for the same email is exactly the failure
  * this is meant to prevent. */
 const THINKING_BUDGET_TOKENS = 2000;
-const MAX_TOKENS = 8000;
+
+/** A body-text-only email yields a handful of events, so 8000 is generous.
+ * A year-at-a-glance calendar attachment yields sixty-odd, and their JSON
+ * alone runs several thousand tokens — truncating it would null
+ * `parsed_output`, fail the extraction, and pay again on the retry. Raised only
+ * when an attachment is actually present, so the common case stays cheap. */
+const MAX_TOKENS_TEXT_ONLY = 8000;
+const MAX_TOKENS_WITH_ATTACHMENTS = 16000;
 
 /** Rewrites whatever ISO-8601 shape the model produced into the one strict
  * form the app can actually decode.
@@ -191,7 +203,8 @@ export async function extractEvents(
   apiKey: string,
   subject: string,
   bodyText: string,
-  receivedAt: Date = new Date()
+  receivedAt: Date = new Date(),
+  attachments: StoredAttachment[] = []
 ): Promise<ExtractedEvent[]> {
   // maxRetries is explicit because the SDK's default of 2 sits *inside* an
   // outer retry: a failed extraction releases the row back to pending and a
@@ -199,13 +212,18 @@ export async function extractEvents(
   // could bill three model calls per pass.
   const client = new Anthropic({ apiKey, maxRetries: 1 });
 
+  // Text first, then each attachment. The prompt has to precede the images for
+  // its date-resolution rules to apply to what the model reads in them.
+  const content = [
+    { type: "text" as const, text: buildPrompt(subject, prepareBody(bodyText), receivedAt) },
+    ...attachments.flatMap(attachmentBlocks),
+  ];
+
   const message = await client.beta.messages.parse({
     model: "claude-opus-5",
-    max_tokens: MAX_TOKENS,
+    max_tokens: attachments.length > 0 ? MAX_TOKENS_WITH_ATTACHMENTS : MAX_TOKENS_TEXT_ONLY,
     thinking: { type: "enabled", budget_tokens: THINKING_BUDGET_TOKENS },
-    messages: [
-      { role: "user", content: buildPrompt(subject, prepareBody(bodyText), receivedAt) },
-    ],
+    messages: [{ role: "user", content }],
     output_format: betaZodOutputFormat(Extraction),
   });
 
@@ -214,7 +232,7 @@ export async function extractEvents(
   // only visible on the billing page.
   console.log(
     `Extraction usage: input=${message.usage.input_tokens} output=${message.usage.output_tokens} ` +
-      `stop=${message.stop_reason} subject="${subject.slice(0, 60)}"`
+      `stop=${message.stop_reason} attachments=${attachments.length} subject="${subject.slice(0, 60)}"`
   );
 
   // `parsed_output` is null when the response didn't satisfy the schema.

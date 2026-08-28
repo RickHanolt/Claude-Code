@@ -2,6 +2,7 @@ import PostalMime from "postal-mime";
 import { extractEvents } from "./extractor";
 import { randomToken, sha256Hex } from "./auth";
 import { collapseDuplicates, contentFingerprint, isDuplicateEvent, type ExistingEvent } from "./dedupe";
+import { selectAttachment, type StoredAttachment } from "./attachments";
 
 export interface Env {
   DB: D1Database;
@@ -143,11 +144,19 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
     if (claim.meta.changes !== 1) continue;
 
     try {
+      const attachments = await env.DB.prepare(
+        `SELECT filename, media_type as mediaType, data FROM email_attachments
+         WHERE forwarded_email_id = ?`
+      )
+        .bind(email.id)
+        .all<StoredAttachment>();
+
       const events = await extractEvents(
         env.ANTHROPIC_API_KEY,
         email.subject,
         email.bodyText,
-        new Date(email.receivedAt)
+        new Date(email.receivedAt),
+        attachments.results ?? []
       );
 
       // Drop events this household already has. Two emails can describe the
@@ -339,7 +348,10 @@ export default {
       return;
     }
 
-    const parsed = await new PostalMime().parse(message.raw);
+    // base64 is what the Messages API takes, so ask postal-mime for it
+    // directly rather than converting an ArrayBuffer by hand — one less place
+    // to corrupt bytes.
+    const parsed = await new PostalMime({ attachmentEncoding: "base64" }).parse(message.raw);
     const subject = (parsed.subject ?? "").trim();
     const bodyText = (parsed.text ?? stripHtml(parsed.html ?? "")).trim();
     const sender = parsed.from?.address ?? message.from ?? "";
@@ -366,21 +378,49 @@ export default {
     // would put seconds of latency into the handler that decides whether
     // Cloudflare takes the message, and an API outage would start bouncing
     // real school mail.
-    await env.DB.prepare(
-      `INSERT INTO forwarded_emails
-         (id, household_id, sender, subject, body_text, received_at, content_hash)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        crypto.randomUUID(),
+    const emailID = crypto.randomUUID();
+
+    // The email and its attachments land in one batch. Split apart, a failure
+    // between them would leave an email that looks fully stored but extracts
+    // without the calendar that was the whole point of forwarding it.
+    const attachments = (parsed.attachments ?? [])
+      .map(selectAttachment)
+      .filter((item): item is StoredAttachment => item !== null);
+
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO forwarded_emails
+           (id, household_id, sender, subject, body_text, received_at, content_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        emailID,
         household.id,
         sender,
         subject || "(no subject)",
         bodyText,
         receivedAt,
         contentHash
-      )
-      .run();
+      ),
+      ...attachments.map((attachment) =>
+        env.DB.prepare(
+          `INSERT INTO email_attachments
+             (id, forwarded_email_id, household_id, filename, media_type, data, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(),
+          emailID,
+          household.id,
+          attachment.filename,
+          attachment.mediaType,
+          attachment.data,
+          receivedAt
+        )
+      ),
+    ]);
+
+    if (attachments.length > 0) {
+      console.log(`Stored ${attachments.length} attachment(s) for "${subject}".`);
+    }
 
     // Then extract in the background. Mail arrives long before anyone opens
     // the app, so in practice the events are ready and waiting by the time
