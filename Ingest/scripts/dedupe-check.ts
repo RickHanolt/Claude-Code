@@ -44,6 +44,29 @@ check(
   false
 );
 
+// An email carrying a calendar is not the same email as one that isn't. The
+// first version hashed text only, so re-forwarding to pick up an attachment the
+// original lacked would have been dropped as a duplicate.
+check(
+  "attachments change the fingerprint",
+  contentFingerprint("Newsletter", body) ===
+    contentFingerprint("Newsletter", body, [
+      { filename: "calendar.pdf", mediaType: "application/pdf", data: "AAAA" },
+    ]),
+  false
+);
+
+check(
+  "the same attachment set fingerprints the same",
+  contentFingerprint("Newsletter", body, [
+    { filename: "calendar.pdf", mediaType: "application/pdf", data: "AAAA" },
+  ]) ===
+    contentFingerprint("Newsletter", body, [
+      { filename: "calendar.pdf", mediaType: "application/pdf", data: "BBBB" },
+    ]),
+  true
+);
+
 // --- Layer 2: event matching ------------------------------------------------
 
 const existing = [

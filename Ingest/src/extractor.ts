@@ -117,29 +117,25 @@ function prepareBody(bodyText: string): string {
   return cleaned.slice(0, MAX_BODY_CHARS);
 }
 
-/** Bounded reasoning instead of the adaptive default.
+/** Extended thinking is switched OFF, explicitly.
  *
- * The first live extractions cost ~$1.40 across a couple of attempts, roughly
- * 60x the estimate, because `thinking` was omitted here. Opus 5 then reasons
- * adaptively and bills it as output at Opus output rates, with nothing but
- * `max_tokens` (16000 at the time) as a ceiling.
+ * It was briefly capped at a 2000-token budget instead, to bound the cost of
+ * the adaptive default. That change correlates exactly with extraction
+ * breaking: every email received before it deployed extracted cleanly, and
+ * every one after failed all three attempts. `thinking` is the only parameter
+ * that changed, and it had never run against the live API — I could not test
+ * it from the build environment and shipped it anyway.
  *
- * Deduplicating an event that appears in both a summary list and a detail
- * paragraph, and resolving a bare "Sept. 9" against the received date, do
- * genuinely benefit from reasoning — so this caps the budget rather than
- * switching thinking off.
+ * Disabling rather than removing the parameter: omitting it lets Opus 5 reason
+ * adaptively, billed as output tokens with only max_tokens as a ceiling, which
+ * is what turned a ~$0.02 estimate into $1.40. Off is both the cheap answer and
+ * the one that removes the parameter combination under suspicion.
  *
- * `max_tokens` must stay comfortably above the budget. If thinking crowds out
- * the JSON the response truncates, `parsed_output` comes back null, and the
- * email gets retried — paying twice for the same email is exactly the failure
- * this is meant to prevent. */
-const THINKING_BUDGET_TOKENS = 2000;
-
-/** A body-text-only email yields a handful of events, so 8000 is generous.
- * A year-at-a-glance calendar attachment yields sixty-odd, and their JSON
- * alone runs several thousand tokens — truncating it would null
- * `parsed_output`, fail the extraction, and pay again on the retry. Raised only
- * when an attachment is actually present, so the common case stays cheap. */
+ * Extraction here is a structured read of text that is already explicit —
+ * finding the dates a newsletter states outright. The prompt rules carry the
+ * judgement calls. If quality drops measurably without reasoning, a bounded
+ * budget can come back, but only after a live call proves the API accepts it.
+ */
 const MAX_TOKENS_TEXT_ONLY = 8000;
 const MAX_TOKENS_WITH_ATTACHMENTS = 16000;
 
@@ -253,7 +249,7 @@ export async function extractEvents(
   const message = await client.beta.messages.parse({
     model: "claude-opus-5",
     max_tokens: attachments.length > 0 ? MAX_TOKENS_WITH_ATTACHMENTS : MAX_TOKENS_TEXT_ONLY,
-    thinking: { type: "enabled", budget_tokens: THINKING_BUDGET_TOKENS },
+    thinking: { type: "disabled" },
     messages: [{ role: "user", content }],
     output_format: betaZodOutputFormat(Extraction),
   });

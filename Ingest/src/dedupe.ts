@@ -21,15 +21,32 @@
  * Forwarded-message headers are stripped before hashing because Gmail stamps
  * the forward with its own `Date:` line — two forwards of one newsletter differ
  * by those bytes and nothing else, which would defeat a naive hash of the raw
- * body. Whatever slips past this is caught by layer 2. */
-export function contentFingerprint(subject: string, bodyText: string): string {
+ * body. Whatever slips past this is caught by layer 2.
+ *
+ * Attachments are part of the fingerprint. The first version hashed subject and
+ * body only, which meant an email carrying a year calendar and the same email
+ * carrying nothing fingerprinted identically — so re-forwarding a newsletter to
+ * pick up an attachment the first copy lacked would have been silently dropped
+ * as a duplicate. Identity is name, type and size rather than the bytes: it
+ * distinguishes any two real documents, and avoids concatenating megabytes of
+ * base64 to answer a question about sameness. */
+export function contentFingerprint(
+  subject: string,
+  bodyText: string,
+  attachments: ReadonlyArray<{ filename: string | null; mediaType: string; data: string }> = []
+): string {
   const stripped = bodyText
     .split("\n")
     .filter((line) => !/^\s*(from|to|cc|bcc|date|sent|subject|reply-to)\s*:/i.test(line))
     .filter((line) => !/^\s*-+\s*forwarded message\s*-+\s*$/i.test(line))
     .join("\n");
 
-  return `${normalizeText(subject)}\n${normalizeText(stripped)}`;
+  const attachmentPart = attachments
+    .map((a) => `${a.filename ?? ""}|${a.mediaType}|${a.data.length}`)
+    .sort()
+    .join(",");
+
+  return `${normalizeText(subject)}\n${normalizeText(stripped)}\n${attachmentPart}`;
 }
 
 function normalizeText(value: string): string {

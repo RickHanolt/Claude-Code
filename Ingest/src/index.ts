@@ -229,7 +229,9 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
           )
         ),
         env.DB.prepare(
-          "UPDATE forwarded_emails SET extraction_status = 'done', extracted_at = ? WHERE id = ?"
+          `UPDATE forwarded_emails
+           SET extraction_status = 'done', extracted_at = ?, extraction_error = NULL
+           WHERE id = ?`
         ).bind(new Date().toISOString(), email.id),
       ]);
     } catch (error) {
@@ -241,13 +243,22 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
       // stops being retried. The email itself is still returned by /v1/pending
       // — nothing is lost, it just arrives without events — and 'failed' says
       // so explicitly rather than looking like "no dates in this one".
+      // Record the reason ON THE ROW, not only in a log stream. An extraction
+      // that fails silently is indistinguishable from an email with no dates
+      // in it, and working out which took a comparison of failure timestamps
+      // against deploy timestamps. The message is truncated because an API
+      // error can carry a full request echo, and the first line is the part
+      // that identifies the problem.
+      const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       console.error(`Extraction failed for email ${email.id}:`, error);
+
       await env.DB.prepare(
         `UPDATE forwarded_emails
-         SET extraction_status = CASE WHEN extraction_attempts >= ? THEN 'failed' ELSE 'pending' END
+         SET extraction_status = CASE WHEN extraction_attempts >= ? THEN 'failed' ELSE 'pending' END,
+             extraction_error = ?
          WHERE id = ?`
       )
-        .bind(MAX_EXTRACTION_ATTEMPTS, email.id)
+        .bind(MAX_EXTRACTION_ATTEMPTS, reason.slice(0, 500), email.id)
         .run();
     }
   }
@@ -370,7 +381,11 @@ export default {
     // calls, and every event twice in the app. Accept the message either way —
     // the mail was delivered correctly and bouncing it would be wrong — but
     // don't store or extract a second copy.
-    const contentHash = await sha256Hex(contentFingerprint(subject, bodyText));
+    const attachments = (parsed.attachments ?? [])
+      .map(selectAttachment)
+      .filter((item): item is StoredAttachment => item !== null);
+
+    const contentHash = await sha256Hex(contentFingerprint(subject, bodyText, attachments));
 
     const alreadyStored = await env.DB.prepare(
       "SELECT id FROM forwarded_emails WHERE household_id = ? AND content_hash = ?"
@@ -392,10 +407,6 @@ export default {
     // The email and its attachments land in one batch. Split apart, a failure
     // between them would leave an email that looks fully stored but extracts
     // without the calendar that was the whole point of forwarding it.
-    const attachments = (parsed.attachments ?? [])
-      .map(selectAttachment)
-      .filter((item): item is StoredAttachment => item !== null);
-
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO forwarded_emails
