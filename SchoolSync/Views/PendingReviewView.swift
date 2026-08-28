@@ -12,6 +12,7 @@ struct PendingReviewView: View {
 
     @State private var emails: [PendingForwardedEmail] = []
     @State private var eventsByEmail: [String: [PendingCandidateEvent]] = [:]
+    @State private var exceptionsByEmail: [String: [PendingCandidateException]] = [:]
     @State private var isLoading = false
     @State private var errorMessage: String?
 
@@ -29,6 +30,7 @@ struct PendingReviewView: View {
                         PendingEmailConfirmView(
                             email: email,
                             candidates: eventsByEmail[email.id] ?? [],
+                            exceptions: exceptionsByEmail[email.id] ?? [],
                             kids: kids,
                             schools: schools,
                             onSave: { kidID, schoolID, checkedEventIDs in
@@ -71,10 +73,81 @@ struct PendingReviewView: View {
             let response = try await client.fetchPending()
             emails = response.emails
             eventsByEmail = Dictionary(grouping: response.events, by: \.forwardedEmailId)
+            exceptionsByEmail = Dictionary(grouping: response.exceptions ?? [], by: \.forwardedEmailId)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Writes day exceptions into the local store.
+    ///
+    /// Upserted by identity rather than inserted, so re-reading a month that
+    /// has been corrected once doesn't stack a second opinion about the same
+    /// day on top of the first — the same property SchoolEventRecord gets from
+    /// externalID.
+    ///
+    /// A manual edit is never overwritten. If someone fixed a day by hand, a
+    /// later document re-stating the original is not new information, and
+    /// silently undoing their correction is the fastest way to make the screen
+    /// untrustworthy.
+    private func saveExceptions(
+        _ exceptions: [PendingCandidateException],
+        kidID: UUID,
+        subject: String
+    ) {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.dateFormat = "yyyy-MM-dd"
+        // The day string is a wall-clock date with no zone, so parse it in the
+        // device's own calendar rather than UTC — otherwise "pack a lunch on
+        // the 9th" lands on the 8th for anyone west of Greenwich.
+        formatter.timeZone = calendar.timeZone
+
+        let existing = (try? modelContext.fetch(FetchDescriptor<DayException>())) ?? []
+
+        for exception in exceptions {
+            guard let day = formatter.date(from: exception.day) else { continue }
+            let startOfDay = calendar.startOfDay(for: day)
+
+            let identity = DayException.identity(
+                kidID: kidID,
+                day: startOfDay,
+                field: exception.dayFieldValue,
+                source: .email
+            )
+
+            if let manual = existing.first(where: {
+                $0.kidID == kidID
+                    && calendar.isDate($0.day, inSameDayAs: startOfDay)
+                    && $0.field == exception.dayFieldValue
+                    && $0.source == .manual
+            }) {
+                _ = manual
+                continue
+            }
+
+            if let match = existing.first(where: { $0.id == identity }) {
+                match.value = exception.value
+                match.provenance = exception.note ?? subject
+                match.isNotable = exception.isNotableException
+            } else {
+                modelContext.insert(
+                    DayException(
+                        kidID: kidID,
+                        day: startOfDay,
+                        field: exception.dayFieldValue,
+                        value: exception.value,
+                        source: .email,
+                        provenance: exception.note ?? subject,
+                        isNotable: exception.isNotableException
+                    )
+                )
+            }
+        }
+
+        try? modelContext.save()
     }
 
     private func save(email: PendingForwardedEmail, kidID: UUID, schoolID: UUID, checkedEventIDs: Set<String>) async {
@@ -109,12 +182,24 @@ struct PendingReviewView: View {
         try? store.upsert(eventDTOs)
         try? store.insertForwardedEmailIfNeeded(emailDTO)
 
+        // Exceptions inherit the kid chosen for the email, the same way events
+        // do. The backend has never known which child a document belongs to —
+        // that answer lives here, and asking again per-day would be absurd for
+        // a lunch calendar covering a month.
+        let exceptions = exceptionsByEmail[email.id] ?? []
+        saveExceptions(exceptions, kidID: kidID, subject: email.subject)
+
         if let client = IngestClient.configured() {
-            try? await client.acknowledge(emailIDs: [email.id], eventIDs: checked.map(\.id))
+            try? await client.acknowledge(
+                emailIDs: [email.id],
+                eventIDs: checked.map(\.id),
+                exceptionIDs: exceptions.map(\.id)
+            )
         }
 
         emails.removeAll { $0.id == email.id }
         eventsByEmail[email.id] = nil
+        exceptionsByEmail[email.id] = nil
     }
 }
 
@@ -123,6 +208,7 @@ private struct PendingEmailConfirmView: View {
 
     let email: PendingForwardedEmail
     let candidates: [PendingCandidateEvent]
+    let exceptions: [PendingCandidateException]
     let kids: [KidRecord]
     let schools: [SchoolRecord]
     let onSave: (UUID, UUID, Set<String>) async -> Void
@@ -198,6 +284,38 @@ private struct PendingEmailConfirmView: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(.primary)
                     }
+                }
+            }
+
+            if !exceptions.isEmpty {
+                Section {
+                    ForEach(exceptions) { exception in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: exception.isNotableException ? "exclamationmark.circle.fill" : "circle")
+                                .font(.caption2)
+                                .foregroundStyle(exception.isNotableException ? Color.accentColor : Color.secondary)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(exception.day) · \(exception.dayFieldValue.label)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(exception.value)
+                                    .font(.subheadline)
+                                if let note = exception.note, !note.isEmpty {
+                                    Text(note).font(.caption2).foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Daily changes")
+                } footer: {
+                    // Not individually checkable, unlike events. A lunch
+                    // calendar is twenty days of the same answer and ticking
+                    // each one would be worse than useless; they save together
+                    // with the kid chosen below, and any day can be corrected
+                    // afterwards.
+                    Text("Saved together for the kid you choose below. A marked line needs your attention; an unmarked one just fills in that day's detail.")
                 }
             }
 

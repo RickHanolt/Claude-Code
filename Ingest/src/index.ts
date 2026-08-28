@@ -159,7 +159,7 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
         .bind(email.id)
         .all<StoredAttachment>();
 
-      const events = await extractEvents(
+      const { events, exceptions } = await extractEvents(
         env.ANTHROPIC_API_KEY,
         email.subject,
         email.bodyText,
@@ -210,6 +210,12 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
       // pending *with* its events already saved — and the retry would insert
       // them a second time. Batched, either the email is marked done with its
       // events or nothing landed and the retry is clean.
+      const insertException = env.DB.prepare(
+        `INSERT OR REPLACE INTO candidate_exceptions
+           (id, forwarded_email_id, household_id, day, field, value, is_notable, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+
       const insertEvent = env.DB.prepare(
         `INSERT INTO candidate_events
            (id, forwarded_email_id, household_id, title, start_date, end_date, is_all_day, notes)
@@ -217,6 +223,22 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
       );
 
       await env.DB.batch([
+        ...exceptions.map((exception) =>
+          insertException.bind(
+            // Deterministic rather than random, so re-reading the same month
+            // updates a day in place instead of stacking a second opinion about
+            // it. Same upsert-not-duplicate property candidate events get from
+            // their dedup pass.
+            `${email.id}:${exception.date}:${exception.field}`,
+            email.id,
+            householdID,
+            exception.date,
+            exception.field,
+            exception.value,
+            exception.isNotable ? 1 : 0,
+            exception.note
+          )
+        ),
         ...fresh.map((event) =>
           insertEvent.bind(
             crypto.randomUUID(),
@@ -317,7 +339,27 @@ async function handlePending(request: Request, env: Env, ctx: ExecutionContext):
     return { ...event, isAllDay: Boolean(event.isAllDay) };
   }) as Array<{ title: string; startDate: string; isAllDay: boolean }>;
 
-  return json({ emails: emails.results, events: collapseDuplicates(events_) });
+  const exceptionRows = await env.DB.prepare(
+    `SELECT id, forwarded_email_id as forwardedEmailId, day, field, value,
+            is_notable as isNotable, note
+     FROM candidate_exceptions WHERE household_id = ? AND consumed_at IS NULL
+     ORDER BY day ASC`
+  )
+    .bind(household.id)
+    .all();
+
+  // Same INTEGER-to-Bool conversion the events need: D1 hands back 0/1 and
+  // JSONDecoder will not read a number as a Swift Bool.
+  const exceptions = (exceptionRows.results ?? []).map((row) => {
+    const exception = row as Record<string, unknown>;
+    return { ...exception, isNotable: Boolean(exception.isNotable) };
+  });
+
+  return json({
+    emails: emails.results,
+    events: collapseDuplicates(events_),
+    exceptions,
+  });
 }
 
 /** Marks emails/events as consumed once the app has pulled them into its
@@ -327,8 +369,8 @@ async function handleAck(request: Request, env: Env): Promise<Response> {
   if (!household) return json({ error: "unauthorized" }, 401);
 
   const body = await request
-    .json<{ emailIds?: string[]; eventIds?: string[] }>()
-    .catch(() => ({}) as { emailIds?: string[]; eventIds?: string[] });
+    .json<{ emailIds?: string[]; eventIds?: string[]; exceptionIds?: string[] }>()
+    .catch(() => ({}) as { emailIds?: string[]; eventIds?: string[]; exceptionIds?: string[] });
   const now = new Date().toISOString();
 
   for (const id of body.emailIds ?? []) {
@@ -338,6 +380,12 @@ async function handleAck(request: Request, env: Env): Promise<Response> {
   }
   for (const id of body.eventIds ?? []) {
     await env.DB.prepare("UPDATE candidate_events SET consumed_at = ? WHERE id = ? AND household_id = ?")
+      .bind(now, id, household.id)
+      .run();
+  }
+
+  for (const id of body.exceptionIds ?? []) {
+    await env.DB.prepare("UPDATE candidate_exceptions SET consumed_at = ? WHERE id = ? AND household_id = ?")
       .bind(now, id, household.id)
       .run();
   }

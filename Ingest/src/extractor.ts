@@ -53,11 +53,44 @@ const ExtractedEvent = z.object({
  * invisible to `tsc` — the helper's types were satisfied by zod 3 while
  * `betaZodOutputFormat` called `z.toJSONSchema()`, a zod 4 API, and threw at
  * runtime on every extraction. Typecheck-green, production-broken. */
+/** A day where a kid's ordinary routine doesn't hold.
+ *
+ * Separate from an event because they answer different questions. An event is
+ * something on the calendar at a time; an exception is "what does this kid need
+ * today" differing from the baseline. "Pizza day — no lunch needed" is not a
+ * calendar entry a parent wants; it's a change to one field of one morning.
+ *
+ * A Boonli month or a rotation calendar produces twenty of these and zero
+ * events, which is exactly why extraction couldn't previously read them: it had
+ * no shape to put them in. */
+const ExtractedException = z.object({
+  date: z.string().describe("The single day this applies to, as YYYY-MM-DD."),
+  field: z
+    .enum(["breakfast", "lunch", "clothing", "reminder"])
+    .describe("Which part of the kid's day this changes."),
+  value: z
+    .string()
+    .describe(
+      "What to show that morning, phrased as a parent would read it: 'Pack a lunch', 'Jeans day', 'Wear sneakers'."
+    ),
+  isNotable: z
+    .boolean()
+    .describe(
+      "True when this needs the parent's attention (a change from routine). False when it merely fills in a detail that varies daily and means nothing is wrong, like the day's menu item."
+    ),
+  note: z
+    .string()
+    .nullable()
+    .describe("Why, in a few words — 'pizza day', 'no school'. Null if the document doesn't say."),
+});
+
 export const Extraction = z.object({
   events: z.array(ExtractedEvent),
+  exceptions: z.array(ExtractedException),
 });
 
 export type ExtractedEvent = z.infer<typeof ExtractedEvent>;
+export type ExtractedException = z.infer<typeof ExtractedException>;
 
 /** Reference date is the moment the email arrived, so "next Tuesday" and
  * bare month/day pairs resolve against the right year — the wrong-year bug
@@ -90,6 +123,12 @@ Rules:
 - Set isAllDay true when the email gives no clock time. A multi-day window ("iReady testing Aug 31 - Sept 4") is all-day with a start and an end, not a timed event.
 - Put location and useful detail in notes. Null if there is nothing worth keeping.
 - If the email contains no real dated events, return an empty list. That is a valid and common answer.
+
+Some documents are not lists of events at all. A lunch-ordering calendar, a menu, or a class-rotation schedule describes what a child needs on each ordinary day. Put those in "exceptions", not "events" — a parent does not want twenty calendar entries saying "packed lunch".
+- A day marked as ordered or provided is one exception for that date. A day marked as needing nothing is one exception saying so, with the reason if the document gives one.
+- A plain weekday with no marking usually means the routine applies and needs no exception at all. Only emit one if the document positively says something about that day.
+- Set isNotable true when a parent must act or change something, false when you are only filling in a detail that varies every day anyway.
+- A document can produce both: a menu with "no school" on one date gives an exception for the routine and an event for the closure.
 - Any attached calendars, flyers or schedules are part of this email. Read every date in them, not just the ones repeated in the body — a year-at-a-glance calendar listing sixty dates should produce sixty entries.
 - A date range in an attachment ("3/25-4/2 Easter Break", "23-27 Thanksgiving Break") is ONE entry spanning it, not one per day.
 - An attachment may state a month and year only in a column or section heading. Apply that heading to every date beneath it.
@@ -237,7 +276,7 @@ export async function extractEvents(
   receivedAt: Date = new Date(),
   attachments: StoredAttachment[] = [],
   timeZone: string = DEFAULT_TIMEZONE
-): Promise<ExtractedEvent[]> {
+): Promise<{ events: ExtractedEvent[]; exceptions: ExtractedException[] }> {
   // maxRetries is explicit because the SDK's default of 2 sits *inside* an
   // outer retry: a failed extraction releases the row back to pending and a
   // later pass tries it again. Left at the default, one consistently bad email
@@ -290,5 +329,14 @@ export async function extractEvents(
     normalized.push({ ...event, startDate, endDate: normalizeISODate(event.endDate, timeZone) });
   }
 
-  return normalized;
+  // Exceptions are day-keyed, so they need date validity but not the
+  // instant-level normalization events get. A malformed date drops the row
+  // rather than storing something the app will fail to parse.
+  const exceptions = message.parsed_output.exceptions.filter((exception) => {
+    const valid = /^\d{4}-\d{2}-\d{2}$/.test(exception.date.trim());
+    if (!valid) console.warn(`Dropping exception with unparseable date: ${JSON.stringify(exception.date)}`);
+    return valid;
+  });
+
+  return { events: normalized, exceptions };
 }

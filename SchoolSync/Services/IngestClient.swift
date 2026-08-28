@@ -38,9 +38,41 @@ struct PendingCandidateEvent: Codable, Identifiable, Hashable {
     var isAllDayEvent: Bool { isAllDay ?? (endDate == nil) }
 }
 
+/// A day where a kid's routine doesn't hold, found in a forwarded document.
+///
+/// Distinct from a candidate event because they answer different questions: an
+/// event is something on the calendar at a time, an exception is a change to
+/// what one kid needs on one morning. A Boonli month yields twenty of these and
+/// no events at all — nobody wants twenty calendar entries reading "packed
+/// lunch".
+struct PendingCandidateException: Codable, Identifiable, Hashable {
+    var id: String
+    var forwardedEmailId: String
+    /// YYYY-MM-DD. A plain string rather than a Date because these are
+    /// day-keyed, and putting them through the same `.iso8601` decoder as
+    /// events would demand a time and an offset that this genuinely doesn't
+    /// have — the failure that hid every email behind a parse error once.
+    var day: String
+    var field: String
+    var value: String
+    var note: String?
+
+    /// Whether this deserves emphasis, or merely fills in a detail. Optional so
+    /// a response from a backend predating the field still decodes.
+    var isNotable: Bool?
+
+    var isNotableException: Bool { isNotable ?? true }
+
+    var dayFieldValue: DayField { DayField(rawValue: field) ?? .reminder }
+}
+
 struct PendingResponse: Codable {
     var emails: [PendingForwardedEmail]
     var events: [PendingCandidateEvent]
+
+    /// Optional so the app keeps working against a backend that predates
+    /// exceptions — a missing key would otherwise fail the entire response.
+    var exceptions: [PendingCandidateException]?
 }
 
 enum IngestClientError: Error {
@@ -74,14 +106,22 @@ struct IngestClient {
 
     /// Tells the backend these emails/events have been pulled into the
     /// local store, so the next `fetchPending()` doesn't return them again.
-    func acknowledge(emailIDs: [String], eventIDs: [String]) async throws {
-        guard !emailIDs.isEmpty || !eventIDs.isEmpty else { return }
+    func acknowledge(
+        emailIDs: [String],
+        eventIDs: [String],
+        exceptionIDs: [String] = []
+    ) async throws {
+        guard !emailIDs.isEmpty || !eventIDs.isEmpty || !exceptionIDs.isEmpty else { return }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("v1/ack"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["emailIds": emailIDs, "eventIds": eventIDs])
+        request.httpBody = try JSONEncoder().encode([
+            "emailIds": emailIDs,
+            "eventIds": eventIDs,
+            "exceptionIds": exceptionIDs,
+        ])
 
         let (_, response) = try await URLSession.shared.data(for: request)
         try Self.validate(response)
