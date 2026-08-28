@@ -96,15 +96,24 @@ newsletters cost $1.40. Three things changed as a result, all in
   deterministically-failing email was retried on every poll forever, billing a
   call each time.
 
-Real token counts are now logged on every extraction. Run `npx wrangler tail`
-in `Ingest/` while a forward comes in and you'll see
-`Extraction usage: input=… output=…` — measure your own volume there rather
-than trusting an estimate in a README.
+A fourth thing turned out to matter more than any of them: extended thinking
+is now switched **off** explicitly. Capping its budget instead looked prudent
+and silently broke extraction for eight hours — every email received after that
+change failed all three attempts, with nothing recording why. Failures now
+write their reason to `forwarded_emails.extraction_error`, so the same question
+is one `SELECT` away instead of an afternoon of comparing timestamps.
 
-The key is optional in the sense that nothing breaks without it — the Worker
-still receives and stores every email, they still appear in the Emails tab,
-they just arrive with no events attached. Add the key later and the backlog
-extracts itself on the next sync.
+**Measured, not estimated:** one real school newsletter yielding 43 events cost
+**$0.12**. That is the big weekly newsletter, not a typical note, so a
+household's monthly bill lands in the low single-digit dollars rather than the
+few cents originally claimed here. Check your own on the Usage page at
+console.anthropic.com rather than trusting this paragraph — that is the whole
+lesson of the 60x miss above.
+
+Token counts are logged on every extraction. Run `npx wrangler tail` in
+`Ingest/`, or open the Worker's log stream in the Cloudflare dashboard, and
+you'll see `Extraction usage: input=… output=…` per call.
+
 
 ## 7. Point the worker at your domain
 
