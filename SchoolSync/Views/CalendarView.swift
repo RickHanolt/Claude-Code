@@ -19,52 +19,6 @@ private func weekdayAccent(for date: Date) -> Color {
     return weekdayAccents[(weekday - 1) % weekdayAccents.count]
 }
 
-/// Toy-block colours, cycled per letter so "MON" reads red/yellow/green the
-/// way a real set of children's blocks would, instead of three of one colour.
-private let blockColors: [Color] = [
-    Color(red: 0.85, green: 0.26, blue: 0.24),
-    Color(red: 0.95, green: 0.70, blue: 0.15),
-    Color(red: 0.15, green: 0.62, blue: 0.35),
-    Color(red: 0.13, green: 0.52, blue: 0.90),
-    Color(red: 0.52, green: 0.27, blue: 0.84),
-]
-
-/// One letter tile.
-///
-/// Drawn rather than shipped as image assets. The weekday abbreviation comes
-/// from the device locale, so an image set would need every letter the user's
-/// language can produce; and flat art can pick its own colours in dark mode,
-/// where a photographic block would sit on a background it wasn't shot for.
-private struct AlphabetBlock: View {
-    let letter: String
-    let color: Color
-    let tilt: Double
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [color, color.opacity(0.72)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-
-            RoundedRectangle(cornerRadius: 2.5, style: .continuous)
-                .fill(Color.white.opacity(0.92))
-                .padding(2.5)
-
-            Text(letter)
-                .font(.system(size: 11, weight: .black, design: .rounded))
-                .foregroundStyle(color)
-        }
-        .frame(width: 19, height: 19)
-        .rotationEffect(.degrees(tilt))
-        .shadow(color: .black.opacity(0.18), radius: 1, x: 0, y: 1)
-    }
-}
-
 /// The day's marker: letter blocks over a large day number.
 private struct DayBlockLabel: View {
     let date: Date
@@ -73,28 +27,22 @@ private struct DayBlockLabel: View {
     /// formatter rather than hardcoded so it follows the device locale, and
     /// capped so a longer abbreviation can't widen the column and squeeze the
     /// event titles beside it.
-    private var letters: [String] {
-        date.formatted(.dateTime.weekday(.abbreviated))
-            .uppercased()
-            .prefix(3)
-            .map(String.init)
+    private var abbreviation: String {
+        String(date.formatted(.dateTime.weekday(.abbreviated)).uppercased().prefix(3))
     }
 
     var body: some View {
         VStack(spacing: 4) {
-            HStack(spacing: 2) {
-                ForEach(Array(letters.enumerated()), id: \.offset) { index, letter in
-                    AlphabetBlock(
-                        letter: letter,
-                        // Offset by the day number so consecutive days don't
-                        // repeat the same three colours down the screen.
-                        color: blockColors[
-                            (index + Calendar.current.component(.day, from: date)) % blockColors.count
-                        ],
-                        tilt: [-4.0, 2.5, -1.5][index % 3]
-                    )
-                }
-            }
+            BlockWord(
+                word: abbreviation,
+                // Seeded by the day number so consecutive days don't repeat
+                // the same three colours down the screen.
+                colorSeed: Calendar.current.component(.day, from: date),
+                // Narrower than BlockWord's default range: this column is
+                // fixed at dayColumnWidth and every point it takes comes out
+                // of the event title beside it.
+                sizes: [19, 17, 15]
+            )
 
             Text(date.formatted(.dateTime.day()))
                 .font(.system(size: 30, weight: .bold, design: .rounded))
