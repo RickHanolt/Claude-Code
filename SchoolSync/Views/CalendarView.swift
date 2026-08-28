@@ -97,8 +97,17 @@ struct CalendarView: View {
                     )
                 } else {
                     List {
-                        ForEach(upcomingByDay, id: \.day) { section in
+                        ForEach(Array(upcomingByDay.enumerated()), id: \.element.day) { dayIndex, section in
                             Section {
+                                if let month = monthHeader(at: dayIndex) {
+                                    Text(month)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .textCase(.uppercase)
+                                        .listRowSeparator(.hidden)
+                                        .listRowInsets(EdgeInsets(top: 16, leading: 12, bottom: 2, trailing: 12))
+                                }
+
                                 ForEach(Array(section.events.enumerated()), id: \.element.externalID) { index, event in
                                     NavigationLink {
                                         EditEventView(event: event, kid: kidsByID[event.kidID])
@@ -154,6 +163,23 @@ struct CalendarView: View {
                 }
             }
         }
+    }
+
+    /// The month label to show above a day, or nil when it's the same month as
+    /// the day before it.
+    ///
+    /// The block marker shows a weekday and a number and nothing else, so
+    /// without this the list reads "30, 1, 15" and looks like the sort broke —
+    /// the restyle dropped the month that the old "Friday, September 4" label
+    /// carried. A header only at the boundary keeps the month visible without
+    /// repeating it on every row.
+    private func monthHeader(at dayIndex: Int) -> String? {
+        let day = upcomingByDay[dayIndex].day
+        guard dayIndex > 0 else { return day.formatted(.dateTime.month(.wide).year()) }
+
+        let previous = upcomingByDay[dayIndex - 1].day
+        let sameMonth = Calendar.current.isDate(day, equalTo: previous, toGranularity: .month)
+        return sameMonth ? nil : day.formatted(.dateTime.month(.wide).year())
     }
 
     private func dayRow(day: Date, event: SchoolEventRecord, isFirstOfDay: Bool) -> some View {

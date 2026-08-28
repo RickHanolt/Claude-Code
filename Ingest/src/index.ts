@@ -3,6 +3,7 @@ import { extractEvents } from "./extractor";
 import { randomToken, sha256Hex } from "./auth";
 import { collapseDuplicates, contentFingerprint, isDuplicateEvent, type ExistingEvent } from "./dedupe";
 import { selectAttachment, type StoredAttachment } from "./attachments";
+import { DEFAULT_TIMEZONE } from "./timezone";
 
 export interface Env {
   DB: D1Database;
@@ -106,6 +107,13 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
   // assumed dead and picked back up.
   const staleClaimCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
+  // The school's zone decides what "3:00 p.m." in an email means. Read once
+  // per pass rather than per email — it can't change mid-pass.
+  const household = await env.DB.prepare("SELECT timezone FROM households WHERE id = ?")
+    .bind(householdID)
+    .first<{ timezone: string }>();
+  const timeZone = household?.timezone || DEFAULT_TIMEZONE;
+
   const pending = await env.DB.prepare(
     `SELECT id, subject, body_text as bodyText, received_at as receivedAt
      FROM forwarded_emails
@@ -156,7 +164,8 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
         email.subject,
         email.bodyText,
         new Date(email.receivedAt),
-        attachments.results ?? []
+        attachments.results ?? [],
+        timeZone
       );
 
       // Drop events this household already has. Two emails can describe the

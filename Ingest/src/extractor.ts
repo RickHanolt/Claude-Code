@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { attachmentBlocks, type StoredAttachment } from "./attachments";
+import { DEFAULT_TIMEZONE, offsetLabel, zonedTimeToUTC } from "./timezone";
 
 /**
  * Replaces the previous `chrono-node` date-detector heuristic (`dateParser.ts`).
@@ -56,8 +57,14 @@ export type ExtractedEvent = z.infer<typeof ExtractedEvent>;
 /** Reference date is the moment the email arrived, so "next Tuesday" and
  * bare month/day pairs resolve against the right year — the wrong-year bug
  * the old parser produced came from having no such anchor. */
-function buildPrompt(subject: string, bodyText: string, receivedAt: Date): string {
+function buildPrompt(
+  subject: string,
+  bodyText: string,
+  receivedAt: Date,
+  timeZone: string
+): string {
   const received = receivedAt.toISOString().slice(0, 10);
+  const offset = offsetLabel(timeZone, receivedAt);
 
   return `You are extracting calendar events from an email a school sent to a parent.
 
@@ -74,6 +81,7 @@ Rules:
 - Ignore forwarded-message headers ("From:", "Date:", "Sent from my iPhone") and publication or "posted on" metadata. Those are not events.
 - Ignore anything without a specific day. A heading like "September Schedule:" is not an event.
 - Title the event as a parent would say it. Do not use the email subject as a title, and do not copy a fragment of surrounding text.
+- Every clock time in a school email is local time in ${timeZone} (currently UTC${offset}). Attach that offset to every time you emit, e.g. a 3:00 p.m. practice is 2026-08-24T15:00:00${offset}. Never emit a time with no offset.
 - Set a time only when the email gives one; otherwise leave endDate null so it reads as all-day.
 - Put location and useful detail in notes. Null if there is nothing worth keeping.
 - If the email contains no real dated events, return an empty list. That is a valid and common answer.
@@ -169,28 +177,50 @@ const MAX_TOKENS_WITH_ATTACHMENTS = 16000;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const NAIVE_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?$/;
 
-export function normalizeISODate(value: string | null): string | null {
+export function normalizeISODate(
+  value: string | null,
+  timeZone: string = DEFAULT_TIMEZONE
+): string | null {
   if (value === null) return null;
 
   const trimmed = value.trim();
   if (!trimmed) return null;
 
-  const candidate = DATE_ONLY.test(trimmed)
-    ? `${trimmed}T12:00:00Z`
-    : NAIVE_DATETIME.test(trimmed)
-      ? `${trimmed}Z`
-      : trimmed;
+  // Both repairs resolve in the school's zone, not UTC.
+  //
+  // Naive datetime: the email said "3:00 p.m." and meant 3pm where the school
+  // is. Reading that as UTC is what put cross-country practice on the calendar
+  // five hours early.
+  //
+  // Date-only: anchored at local noon. Noon UTC was the old rule and it kept
+  // the right calendar day in the Americas only by luck of the offset's sign;
+  // local noon keeps it in every zone, which starts mattering the moment a
+  // household is provisioned somewhere else.
+  if (DATE_ONLY.test(trimmed)) {
+    const noon = zonedTimeToUTC(trimmed + "T12:00:00", timeZone);
+    return noon ? formatInstant(noon) : null;
+  }
 
-  const parsed = new Date(candidate);
+  if (NAIVE_DATETIME.test(trimmed)) {
+    const withSeconds = trimmed.length === 16 ? trimmed + ":00" : trimmed;
+    const resolved = zonedTimeToUTC(withSeconds, timeZone);
+    return resolved ? formatInstant(resolved) : null;
+  }
+
+  const parsed = new Date(trimmed);
   if (Number.isNaN(parsed.getTime())) return null;
 
-  // Milliseconds are dropped deliberately. `.withInternetDateTime`, the mode
-  // the app's decoder uses, rejects fractional seconds unless
-  // `.withFractionalSeconds` is also set. Recent Foundation is lenient about
-  // it — the emails' received_at carries `.000Z` and decodes fine today — but
-  // "works because the platform is currently forgiving" is not a property
-  // worth depending on, and this form is canonical RFC 3339 either way.
-  return parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
+  return formatInstant(parsed);
+}
+
+/** Milliseconds are dropped deliberately. `.withInternetDateTime`, the mode the
+ * app's decoder uses, rejects fractional seconds unless `.withFractionalSeconds`
+ * is also set. Recent Foundation is lenient about it — the emails' received_at
+ * carries `.000Z` and decodes fine today — but "works because the platform is
+ * currently forgiving" is not a property worth depending on, and this form is
+ * canonical RFC 3339 either way. */
+function formatInstant(instant: Date): string {
+  return instant.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /**
@@ -204,7 +234,8 @@ export async function extractEvents(
   subject: string,
   bodyText: string,
   receivedAt: Date = new Date(),
-  attachments: StoredAttachment[] = []
+  attachments: StoredAttachment[] = [],
+  timeZone: string = DEFAULT_TIMEZONE
 ): Promise<ExtractedEvent[]> {
   // maxRetries is explicit because the SDK's default of 2 sits *inside* an
   // outer retry: a failed extraction releases the row back to pending and a
@@ -215,7 +246,7 @@ export async function extractEvents(
   // Text first, then each attachment. The prompt has to precede the images for
   // its date-resolution rules to apply to what the model reads in them.
   const content = [
-    { type: "text" as const, text: buildPrompt(subject, prepareBody(bodyText), receivedAt) },
+    { type: "text" as const, text: buildPrompt(subject, prepareBody(bodyText), receivedAt, timeZone) },
     ...attachments.flatMap(attachmentBlocks),
   ];
 
@@ -248,14 +279,14 @@ export async function extractEvents(
   const normalized: ExtractedEvent[] = [];
 
   for (const event of message.parsed_output.events) {
-    const startDate = normalizeISODate(event.startDate);
+    const startDate = normalizeISODate(event.startDate, timeZone);
 
     if (!startDate) {
       console.warn(`Dropping event with unparseable startDate: ${JSON.stringify(event.startDate)}`);
       continue;
     }
 
-    normalized.push({ ...event, startDate, endDate: normalizeISODate(event.endDate) });
+    normalized.push({ ...event, startDate, endDate: normalizeISODate(event.endDate, timeZone) });
   }
 
   return normalized;

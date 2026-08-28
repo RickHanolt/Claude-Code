@@ -1,0 +1,12 @@
+-- Where the school actually is, so a stated clock time means what it says.
+--
+-- A newsletter said cross-country practice runs "3:00-4:00 p.m." The model
+-- returned 2026-08-24T15:00:00 with no offset — correctly, since the email
+-- states none — and the normalizer read naive datetimes as UTC. The app showed
+-- 10:00 AM. Five hours early, on the one thing this app exists to get right.
+--
+-- Per household rather than a Worker-wide constant: the point of this backend
+-- is that another family can be provisioned onto it, and they will not all be
+-- in Chicago. Defaulted so existing rows and the current provisioning call
+-- keep working untouched.
+ALTER TABLE households ADD COLUMN timezone TEXT NOT NULL DEFAULT 'America/Chicago';
