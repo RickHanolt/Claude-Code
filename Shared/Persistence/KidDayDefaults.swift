@@ -119,6 +119,22 @@ final class DayException {
     /// can show why it's overriding the default instead of asserting it.
     var provenance: String?
 
+    /// Whether this override deserves the parent's attention, or merely fills
+    /// in a detail.
+    ///
+    /// The distinction only became obvious against real data. Teddy eats school
+    /// lunch every day, so a menu feed overrides his baseline every day — with
+    /// "Uncured Hot Dog" instead of "School Lunch". Treating that as an
+    /// exception would print every panel in bold with a coloured dot, and the
+    /// rule that makes Morning Mode worth opening ("emphasis means something is
+    /// different today") would collapse in a week.
+    ///
+    /// Both kinds still replace the value. Only a notable one is emphasised:
+    /// a jeans day, a closure, "pack a lunch today". Defaults to true because
+    /// an exception written by a human or pulled from an email almost always
+    /// is one; the bulk feeds set it false explicitly.
+    var isNotable: Bool = true
+
     var field: DayField {
         get { DayField(rawValue: fieldRaw) ?? .reminder }
         set { fieldRaw = newValue.rawValue }
@@ -142,7 +158,8 @@ final class DayException {
         field: DayField,
         value: String,
         source: DayExceptionSource,
-        provenance: String? = nil
+        provenance: String? = nil,
+        isNotable: Bool = true
     ) {
         self.id = DayException.identity(kidID: kidID, day: day, field: field, source: source)
         self.kidID = kidID
@@ -151,5 +168,6 @@ final class DayException {
         self.value = value
         self.sourceRaw = source.rawValue
         self.provenance = provenance
+        self.isNotable = isNotable
     }
 }

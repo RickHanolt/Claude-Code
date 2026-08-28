@@ -5,9 +5,13 @@ struct ResolvedField: Equatable, Hashable, Sendable {
     let field: DayField
     let value: String
 
-    /// False when this is just the baseline. Morning Mode leans on this: the
-    /// whole point of the screen is that a normal day should be quiet and an
-    /// unusual one should be obvious, so only exceptions get emphasis.
+    /// Whether this line should draw the eye — which is narrower than "differs
+    /// from the baseline".
+    ///
+    /// A menu feed replaces "School Lunch" with today's actual dish every single
+    /// day. That's useful detail, not news, and emphasising it would put every
+    /// panel in bold and destroy the one rule that makes the screen worth
+    /// opening: weight means something is different today.
     let isException: Bool
 
     /// Why the baseline was overridden, in prose. Nil for a plain default.
@@ -85,11 +89,11 @@ enum DayPlanResolver {
             return ResolvedField(
                 field: field,
                 value: winner.value,
-                // An exception that merely restates the default is not news.
-                // A menu confirming "packs lunch" on a Tuesday shouldn't light
-                // up a screen designed so that emphasis means "something is
-                // different today".
-                isException: winner.value != baseline,
+                // Two ways an override can fail to be news: it restates the
+                // default (a menu confirming "packs lunch" on a Tuesday), or
+                // it's informational by nature (today's dish, which differs
+                // every day and means nothing is wrong).
+                isException: winner.value != baseline && winner.isNotable,
                 provenance: winner.provenance
             )
         }
@@ -115,7 +119,7 @@ enum DayPlanResolver {
                 ResolvedField(
                     field: .reminder,
                     value: exception.value,
-                    isException: true,
+                    isException: exception.isNotable,
                     provenance: exception.provenance
                 )
             )

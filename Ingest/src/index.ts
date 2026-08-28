@@ -345,12 +345,63 @@ async function handleAck(request: Request, env: Env): Promise<Response> {
   return json({ ok: true });
 }
 
+/** Fetches a small slice of an upstream feed, so a parser can be written
+ * against real structure instead of a guess.
+ *
+ * Exists because the build environment can't reach mealviewer.com but the
+ * Worker can, and viewing the feed in a phone browser strips the XML tags that
+ * are exactly what a parser needs. Two guesses about unseen response shapes
+ * have already cost this project a day between them.
+ *
+ * Locked down deliberately: this is a server that fetches a URL on request,
+ * which is an SSRF hole if it takes any URL from anyone. Admin token required,
+ * host allowlisted, response truncated, and GET only.
+ */
+const DEBUG_FETCH_HOSTS = ["api.mealviewer.com", "schools.mealviewer.com"];
+const DEBUG_FETCH_LIMIT = 8000;
+
+async function handleDebugFetch(request: Request, env: Env): Promise<Response> {
+  const header = (request.headers.get("authorization") ?? "").trim();
+  if (header !== `Bearer ${env.ADMIN_TOKEN.trim()}`) {
+    return json({ error: "unauthorized" }, 401);
+  }
+
+  const target = new URL(request.url).searchParams.get("url");
+  if (!target) return json({ error: "missing url parameter" }, 400);
+
+  let parsed: URL;
+  try {
+    parsed = new URL(target);
+  } catch {
+    return json({ error: "unparseable url" }, 400);
+  }
+
+  if (parsed.protocol !== "https:" || !DEBUG_FETCH_HOSTS.includes(parsed.hostname)) {
+    return json({ error: `host not allowed; permitted: ${DEBUG_FETCH_HOSTS.join(", ")}` }, 403);
+  }
+
+  const upstream = await fetch(parsed.toString(), { headers: { accept: "application/xml, text/xml, */*" } });
+  const body = await upstream.text();
+
+  return json({
+    status: upstream.status,
+    contentType: upstream.headers.get("content-type"),
+    totalLength: body.length,
+    // Raw and untouched: the whole point is to see the actual markup,
+    // including whatever whitespace and tag names it really uses.
+    head: body.slice(0, DEBUG_FETCH_LIMIT),
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/v1/households" && request.method === "POST") {
       return handleProvision(request, env);
+    }
+    if (url.pathname === "/v1/debug/fetch" && request.method === "GET") {
+      return handleDebugFetch(request, env);
     }
     if (url.pathname === "/v1/pending" && request.method === "GET") {
       return handlePending(request, env, ctx);
