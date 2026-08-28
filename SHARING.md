@@ -117,8 +117,11 @@ there isn't one. Worth having before other people's data is in there.
 - **Errors surface as raw `localizedDescription`.** Fine for a developer, poor
   for anyone else — "The data couldn't be read because it isn't in the correct
   format" meant nothing until it was diagnosed.
-- **No way to see extraction failures in the app.** `extraction_error` is
-  recorded on the row but only visible via a SQL console.
+- **Attachments are dropped by rule, not by capability.** HEIC is the common
+  one — a photo taken on a phone can't be read by the API and can't be
+  transcoded in a Worker, so it's refused with an explanation. Someone else
+  will hit this on their first forward. A real fix converts on the way in,
+  which needs an image service rather than a rule.
 - **The debug fetch endpoint should go.** It's admin-gated and host-allowlisted,
   but it's a URL-fetching endpoint that exists only so a parser could be written
   against a real response. Delete it once MealViewer is settled.

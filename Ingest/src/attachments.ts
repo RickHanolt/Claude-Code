@@ -38,6 +38,30 @@ export interface StoredAttachment {
   data: string;
 }
 
+/** What happened to one MIME part, including why it was left out.
+ *
+ * The reason used to be a bare `null` return. A Boonli month screenshot was
+ * forwarded, produced no events and no exceptions, and the review screen said
+ * "No dates found in this email" — which is also what it says when the model
+ * read the page and genuinely found nothing. Two entirely different situations
+ * rendering identically, with the explanation discarded at the point it was
+ * known. That is the same failure as an extraction that recorded no error, and
+ * it cost the same thing: a person having to ask what happened.
+ *
+ * Reasons are written for whoever has to act on them, not for a log grep. */
+export type AttachmentDecision =
+  | { kind: "keep"; attachment: StoredAttachment }
+  | { kind: "skip"; reason: string };
+
+/** Approximate original size from a base64 length, for a message a person
+ * reads. Base64 runs 4 characters per 3 bytes. */
+function sizeLabel(base64Length: number): string {
+  const bytes = Math.round((base64Length * 3) / 4);
+  return bytes >= 1_000_000
+    ? `${(bytes / 1_000_000).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1000))} KB`;
+}
+
 /** Narrows a parsed MIME part to something worth storing. `content` is typed
  * as a union because postal-mime's encoding is configurable; anything that
  * isn't the base64 string we asked for is skipped rather than guessed at. */
@@ -45,23 +69,47 @@ export function selectAttachment(part: {
   filename: string | null;
   mimeType: string;
   content: ArrayBuffer | Uint8Array | string;
-}): StoredAttachment | null {
+}): AttachmentDecision {
   // Strip any parameters ("image/png; name=calendar.png") and normalize the
   // one spelling mailers get wrong often enough to matter: image/jpg is not a
   // media type the API accepts, and dropping a school's calendar over a
   // three-letter alias would be an absurd way to lose a date.
   const declared = part.mimeType?.toLowerCase().split(";")[0]?.trim() ?? "";
   const mediaType = declared === "image/jpg" ? "image/jpeg" : declared;
+  const name = part.filename?.trim() || "(unnamed)";
 
   const isImage = (SUPPORTED_IMAGE_TYPES as readonly string[]).includes(mediaType);
   const isPdf = mediaType === PDF_TYPE;
-  if (!isImage && !isPdf) return null;
 
-  if (typeof part.content !== "string") return null;
-  if (part.content.length > MAX_BASE64_LENGTH) return null;
-  if (isImage && part.content.length < MIN_IMAGE_BASE64_LENGTH) return null;
+  if (!isImage && !isPdf) {
+    // The case that actually bites: an iPhone photo forwarded as HEIC. The
+    // API does not accept it and a Worker has no way to transcode it, so the
+    // only useful thing to do is say so in a sentence that names the fix.
+    return {
+      kind: "skip",
+      reason: `${name}: ${mediaType || "unknown file type"} can't be read — resend as PNG, JPEG or PDF`,
+    };
+  }
 
-  return { filename: part.filename, mediaType, data: part.content };
+  if (typeof part.content !== "string") {
+    return { kind: "skip", reason: `${name}: attachment was not base64-encoded` };
+  }
+
+  if (part.content.length > MAX_BASE64_LENGTH) {
+    return {
+      kind: "skip",
+      reason: `${name}: ${sizeLabel(part.content.length)} is over the ${sizeLabel(MAX_BASE64_LENGTH)} limit — resend it choosing a smaller image size`,
+    };
+  }
+
+  if (isImage && part.content.length < MIN_IMAGE_BASE64_LENGTH) {
+    return {
+      kind: "skip",
+      reason: `${name}: ${sizeLabel(part.content.length)} is too small to be a document — treated as a logo`,
+    };
+  }
+
+  return { kind: "keep", attachment: { filename: part.filename, mediaType, data: part.content } };
 }
 
 /** The content blocks for one attachment, in the shape the Messages API takes.

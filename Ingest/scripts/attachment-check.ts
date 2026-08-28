@@ -6,9 +6,19 @@
  * calendar never reaches the app and nobody ever finds out — the email looks
  * processed, the events simply aren't there. That's the failure this covers.
  */
-import { attachmentBlocks, selectAttachment } from "../src/attachments";
+import { attachmentBlocks, selectAttachment, type AttachmentDecision } from "../src/attachments";
 
 let failures = 0;
+
+/** The media type of a kept attachment, or undefined if it was skipped. */
+function kept(decision: AttachmentDecision): string | undefined {
+  return decision.kind === "keep" ? decision.attachment.mediaType : undefined;
+}
+
+/** The skip reason, or undefined if the attachment was kept. */
+function skipReason(decision: AttachmentDecision): string | undefined {
+  return decision.kind === "skip" ? decision.reason : undefined;
+}
 
 function check(name: string, actual: unknown, expected: unknown) {
   if (actual !== expected) {
@@ -24,13 +34,13 @@ const tiny = "A".repeat(1_000);
 
 check(
   "a page-sized PNG is accepted",
-  selectAttachment({ filename: "calendar.png", mimeType: "image/png", content: big })?.mediaType,
+  kept(selectAttachment({ filename: "calendar.png", mimeType: "image/png", content: big })),
   "image/png"
 );
 
 check(
   "a PDF is accepted",
-  selectAttachment({ filename: "year.pdf", mimeType: "application/pdf", content: big })?.mediaType,
+  kept(selectAttachment({ filename: "year.pdf", mimeType: "application/pdf", content: big })),
   "application/pdf"
 );
 
@@ -38,20 +48,20 @@ check(
 // PDF is legitimately small.
 check(
   "a small PDF is still accepted",
-  selectAttachment({ filename: "note.pdf", mimeType: "application/pdf", content: tiny })?.mediaType,
+  kept(selectAttachment({ filename: "note.pdf", mimeType: "application/pdf", content: tiny })),
   "application/pdf"
 );
 
 // Mailers write this constantly and the API does not accept it.
 check(
   "image/jpg is normalized to image/jpeg",
-  selectAttachment({ filename: "flyer.jpg", mimeType: "image/jpg", content: big })?.mediaType,
+  kept(selectAttachment({ filename: "flyer.jpg", mimeType: "image/jpg", content: big })),
   "image/jpeg"
 );
 
 check(
   "media type parameters are ignored",
-  selectAttachment({ filename: "c.png", mimeType: 'image/png; name="c.png"', content: big })?.mediaType,
+  kept(selectAttachment({ filename: "c.png", mimeType: 'image/png; name="c.png"', content: big })),
   "image/png"
 );
 
@@ -59,26 +69,67 @@ check(
 
 check(
   "a signature logo is skipped",
-  selectAttachment({ filename: "logo.png", mimeType: "image/png", content: tiny }),
-  null
+  selectAttachment({ filename: "logo.png", mimeType: "image/png", content: tiny }).kind,
+  "skip"
 );
 
 check(
   "an oversized scan is skipped",
-  selectAttachment({ filename: "packet.pdf", mimeType: "application/pdf", content: "A".repeat(2_000_000) }),
-  null
+  selectAttachment({ filename: "packet.pdf", mimeType: "application/pdf", content: "A".repeat(2_000_000) }).kind,
+  "skip"
 );
 
 check(
   "an unreadable type is skipped",
-  selectAttachment({ filename: "roster.xlsx", mimeType: "application/vnd.ms-excel", content: big }),
-  null
+  selectAttachment({ filename: "roster.xlsx", mimeType: "application/vnd.ms-excel", content: big }).kind,
+  "skip"
 );
 
 check(
   "a non-base64 payload is skipped rather than guessed at",
-  selectAttachment({ filename: "c.png", mimeType: "image/png", content: new ArrayBuffer(500_000) }),
-  null
+  selectAttachment({ filename: "c.png", mimeType: "image/png", content: new ArrayBuffer(500_000) }).kind,
+  "skip"
+);
+
+// --- skip reasons ----------------------------------------------------------
+//
+// A skip is only better than a silent drop if the reason survives to somewhere
+// a person will see it. These assert the reason exists and names the file, so
+// a future refactor can't quietly go back to dropping the explanation.
+
+check(
+  "an HEIC photo is skipped by type",
+  skipReason(selectAttachment({ filename: "IMG_4821.HEIC", mimeType: "image/heic", content: big }))?.includes("image/heic"),
+  true
+);
+
+// The failure mode this whole change exists for: a forwarded phone photo
+// yields nothing, and the reason has to say what to do differently.
+check(
+  "the HEIC reason says how to resend",
+  skipReason(selectAttachment({ filename: "IMG_4821.HEIC", mimeType: "image/heic", content: big }))?.includes("PNG"),
+  true
+);
+
+check(
+  "a skip reason names the file",
+  skipReason(selectAttachment({ filename: "roster.xlsx", mimeType: "application/vnd.ms-excel", content: big }))?.includes("roster.xlsx"),
+  true
+);
+
+// Sizes are reported in the units of the thing the sender chose, not in base64
+// characters — "1.5 MB is over the 900 KB limit" is actionable, "2000000" is
+// not.
+check(
+  "an oversized skip reports an approximate original size",
+  skipReason(selectAttachment({ filename: "packet.pdf", mimeType: "application/pdf", content: "A".repeat(2_000_000) }))?.includes("1.5 MB"),
+  true
+);
+
+check(
+  "a missing filename doesn't produce an unreadable reason",
+  skipReason(selectAttachment({ filename: null, mimeType: "image/heic", content: big }))?.startsWith("(unnamed)"),
+  true
 );
 
 // --- block shapes ----------------------------------------------------------

@@ -9,6 +9,28 @@ struct PendingForwardedEmail: Codable, Identifiable, Hashable {
     var subject: String
     var bodyText: String
     var receivedAt: Date
+
+    /// `pending`, `processing`, `done` or `failed`. Optional so a build of the
+    /// app can outlive a backend that predates the column.
+    var extractionStatus: String?
+
+    /// Why extraction failed, if it did. Recorded on the row since migration
+    /// 0008 and, until now, readable only from a SQL console — which meant
+    /// every empty result looked identical to every other empty result.
+    var extractionError: String?
+
+    /// Why an attachment didn't reach the model — wrong file type, too large,
+    /// too small to be anything but a logo.
+    ///
+    /// A forwarded phone screenshot that arrives as HEIC is dropped before
+    /// storage, and without this the app confidently reports "no dates found"
+    /// about a document it never saw.
+    var attachmentNote: String?
+
+    var isStillExtracting: Bool {
+        guard let extractionStatus else { return false }
+        return extractionStatus == "pending" || extractionStatus == "processing"
+    }
 }
 
 /// A date candidate the backend's heuristic (`Ingest/src/dateParser.ts`)

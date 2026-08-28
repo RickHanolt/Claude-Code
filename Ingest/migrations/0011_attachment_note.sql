@@ -1,0 +1,13 @@
+-- Why an attachment did not reach the model.
+--
+-- A Boonli month screenshot was forwarded and the app showed "No dates found
+-- in this email" — the same thing it shows when the model read a document and
+-- found nothing in it. The attachment filter had made a decision and thrown
+-- away its reasoning, so answering "did it even see the picture?" needed a SQL
+-- console and someone who knew the schema.
+--
+-- Same shape as extraction_error in 0008, and for the same reason: the system
+-- knew, at the moment it acted, exactly what a person would later need to be
+-- told. Written at receive time, never overwritten by extraction, because it
+-- describes what arrived rather than what was made of it.
+ALTER TABLE forwarded_emails ADD COLUMN attachment_note TEXT;

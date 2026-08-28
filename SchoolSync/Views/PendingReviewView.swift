@@ -256,9 +256,38 @@ private struct PendingEmailConfirmView: View {
             }
 
             Section("Detected dates") {
+                // An attachment that never reached the model is reported even
+                // when the body did produce dates: an email can carry a
+                // newsletter that parsed fine and a calendar image that didn't,
+                // and the half that worked shouldn't conceal the half that
+                // didn't.
+                if let note = email.attachmentNote {
+                    Label {
+                        Text(note).font(.caption)
+                    } icon: {
+                        Image(systemName: "paperclip.badge.ellipsis")
+                    }
+                    .foregroundStyle(.secondary)
+                }
+
                 if candidates.isEmpty {
-                    Text("No dates found in this email — you can still save it to browse later.")
-                        .foregroundStyle(.secondary)
+                    // Three different situations used to print the same
+                    // sentence. "No dates found" is a confident claim, and it
+                    // was being made about emails that had failed to extract
+                    // and about attachments nothing had ever looked at.
+                    if email.isStillExtracting {
+                        Text("Still reading this email — check back in a moment.")
+                            .foregroundStyle(.secondary)
+                    } else if let error = email.extractionError {
+                        Text("Couldn't read this email: \(error)")
+                            .foregroundStyle(.secondary)
+                    } else if email.attachmentNote != nil {
+                        Text("Nothing found in the message text, and the attachment above wasn't readable.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("No dates found in this email — you can still save it to browse later.")
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     ForEach(candidates) { candidate in
                         Button {

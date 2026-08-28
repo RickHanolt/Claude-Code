@@ -304,9 +304,17 @@ async function handlePending(request: Request, env: Env, ctx: ExecutionContext):
   // from "extraction hasn't succeeded yet". Without it both render as an
   // empty event list, which is exactly how a zod version mismatch spent a
   // day looking like a confident "no dates found".
+  //
+  // extractionError and attachmentNote finish that thought. The status says
+  // whether the model ran; these two say what went wrong when it did, and
+  // whether it was handed everything the email carried. Both were already
+  // recorded and readable only from a SQL console, which meant every empty
+  // result needed someone with database access to interpret it.
   const emails = await env.DB.prepare(
     `SELECT id, sender, subject, body_text as bodyText, received_at as receivedAt,
-            extraction_status as extractionStatus
+            extraction_status as extractionStatus,
+            extraction_error as extractionError,
+            attachment_note as attachmentNote
      FROM forwarded_emails WHERE household_id = ? AND consumed_at IS NULL
      ORDER BY received_at ASC`
   )
@@ -505,9 +513,14 @@ export default {
     // calls, and every event twice in the app. Accept the message either way —
     // the mail was delivered correctly and bouncing it would be wrong — but
     // don't store or extract a second copy.
-    const attachments = (parsed.attachments ?? [])
-      .map(selectAttachment)
-      .filter((item): item is StoredAttachment => item !== null);
+    const decisions = (parsed.attachments ?? []).map(selectAttachment);
+    const attachments = decisions.flatMap((d) => (d.kind === "keep" ? [d.attachment] : []));
+    const skips = decisions.flatMap((d) => (d.kind === "skip" ? [d.reason] : []));
+
+    // Recorded on the email rather than only logged. The one thing a person
+    // needs when a forwarded screenshot yields nothing is to know whether the
+    // model saw it, and Worker logs are not somewhere a parent can look.
+    const attachmentNote = skips.length > 0 ? skips.join("\n") : null;
 
     const contentHash = await sha256Hex(contentFingerprint(subject, bodyText, attachments));
 
@@ -534,8 +547,8 @@ export default {
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO forwarded_emails
-           (id, household_id, sender, subject, body_text, received_at, content_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+           (id, household_id, sender, subject, body_text, received_at, content_hash, attachment_note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         emailID,
         household.id,
@@ -543,7 +556,8 @@ export default {
         subject || "(no subject)",
         bodyText,
         receivedAt,
-        contentHash
+        contentHash,
+        attachmentNote
       ),
       ...attachments.map((attachment) =>
         env.DB.prepare(
@@ -564,6 +578,9 @@ export default {
 
     if (attachments.length > 0) {
       console.log(`Stored ${attachments.length} attachment(s) for "${subject}".`);
+    }
+    for (const skip of skips) {
+      console.warn(`Skipped attachment on "${subject}" — ${skip}`);
     }
 
     // Then extract in the background. Mail arrives long before anyone opens
