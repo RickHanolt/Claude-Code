@@ -148,6 +148,20 @@ private struct PendingEmailConfirmView: View {
 
     private var canSave: Bool { selectedKidID != nil && selectedSchoolID != nil }
 
+    /// An all-day candidate has no meaningful clock time, so don't invent one.
+    ///
+    /// The backend anchors a date-only event at noon UTC deliberately: naive
+    /// midnight renders as the PREVIOUS day in any negative-offset timezone,
+    /// which would silently move an event rather than merely look odd. The
+    /// cost is that noon UTC reads as "7:00 AM" here — a time the email never
+    /// stated. `endDate == nil` is already how this pipeline says "all-day"
+    /// (see the isAllDay mapping below), so use it to drop the time entirely.
+    private static func dateLabel(for candidate: PendingCandidateEvent) -> String {
+        candidate.endDate == nil
+            ? candidate.startDate.formatted(date: .abbreviated, time: .omitted)
+            : candidate.startDate.formatted(date: .abbreviated, time: .shortened)
+    }
+
     var body: some View {
         Form {
             Section("From") {
@@ -171,7 +185,10 @@ private struct PendingEmailConfirmView: View {
                             HStack(alignment: .top) {
                                 Image(systemName: selectedIDs.contains(candidate.id) ? "checkmark.circle.fill" : "circle")
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(candidate.startDate.formatted(date: .abbreviated, time: .shortened))
+                                    Text(candidate.title)
+                                    Text(Self.dateLabel(for: candidate))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                     if let notes = candidate.notes {
                                         Text(notes).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                                     }
