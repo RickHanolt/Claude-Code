@@ -70,31 +70,65 @@ async function handleProvision(request: Request, env: Env): Promise<Response> {
   });
 }
 
-/** Runs extraction for any of this household's emails still marked pending,
- * before the caller reads results back out.
+/** Extracts emails still marked pending.
  *
- * Deliberately best-effort: one email's failure must not fail the poll, and
- * anything that doesn't reach 'done' stays pending so the next poll retries
- * it. That means a missing or invalid API key degrades to "emails arrive with
- * no events yet" rather than losing mail or erroring the app — and the
- * backlog extracts itself once the key is fixed.
+ * ALWAYS run this via `ctx.waitUntil(...)`, never awaited inside a request.
+ * An Opus call on a newsletter routinely takes longer than the app's 60s
+ * URLSession timeout, so awaiting it in the poll handler produced "Couldn't
+ * reach the backend — the request timed out" while the extraction itself was
+ * working fine. waitUntil lets the Worker answer immediately and keep
+ * extracting after the response is sent.
  *
- * Capped per request so a large backlog can't blow the Worker's time budget;
- * successive polls chew through the rest. */
+ * Deliberately best-effort: one email's failure must not affect the others,
+ * and anything that doesn't reach 'done' stays pending so a later pass
+ * retries it. A missing or invalid API key degrades to "emails arrive with
+ * no events yet" rather than losing mail — and the backlog drains itself
+ * once the key is fixed.
+ *
+ * Capped per pass so a large backlog can't exhaust the Worker's time budget;
+ * successive passes chew through the rest. */
 async function extractPendingEmails(env: Env, householdID: string): Promise<void> {
   if (!env.ANTHROPIC_API_KEY) return;
+
+  // Also reclaims rows stuck in 'processing'. Background work started with
+  // waitUntil can be terminated by the platform mid-call, which would
+  // otherwise strand an email in 'processing' permanently — no events, no
+  // retry, no error anywhere. Anything claimed more than 10 minutes ago is
+  // assumed dead and picked back up.
+  const staleClaimCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
   const pending = await env.DB.prepare(
     `SELECT id, subject, body_text as bodyText, received_at as receivedAt
      FROM forwarded_emails
-     WHERE household_id = ? AND extraction_status = 'pending'
+     WHERE household_id = ?
+       AND (extraction_status = 'pending'
+            OR (extraction_status = 'processing' AND (extracted_at IS NULL OR extracted_at < ?)))
      ORDER BY received_at ASC
-     LIMIT 5`
+     LIMIT 3`
   )
-    .bind(householdID)
+    .bind(householdID, staleClaimCutoff)
     .all<{ id: string; subject: string; bodyText: string; receivedAt: string }>();
 
   for (const email of pending.results ?? []) {
+    // Claim the row before doing any work. Extraction now runs in the
+    // background from two triggers (mail arrival and each poll), so two
+    // passes can overlap and read the same pending set — without this both
+    // would extract the same email and insert its events twice. The
+    // conditional UPDATE is atomic: exactly one pass sees changes === 1.
+    // extracted_at doubles as the claim timestamp so a dead claim can be
+    // detected and reclaimed above; on success it's overwritten with the
+    // completion time. Read it as "last touched".
+    const claim = await env.DB.prepare(
+      `UPDATE forwarded_emails SET extraction_status = 'processing', extracted_at = ?
+       WHERE id = ?
+         AND (extraction_status = 'pending'
+              OR (extraction_status = 'processing' AND (extracted_at IS NULL OR extracted_at < ?)))`
+    )
+      .bind(new Date().toISOString(), email.id, staleClaimCutoff)
+      .run();
+
+    if (claim.meta.changes !== 1) continue;
+
     try {
       const events = await extractEvents(
         env.ANTHROPIC_API_KEY,
@@ -131,8 +165,15 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
         ).bind(new Date().toISOString(), email.id),
       ]);
     } catch (error) {
-      // Left pending on purpose — the next poll tries again.
+      // Release the claim so a later pass retries this email. Leaving it
+      // 'processing' would strand it forever, which is how a transient API
+      // error turns into an email that silently never gets its events.
       console.error(`Extraction failed for email ${email.id}:`, error);
+      await env.DB.prepare(
+        "UPDATE forwarded_emails SET extraction_status = 'pending' WHERE id = ?"
+      )
+        .bind(email.id)
+        .run();
     }
   }
 }
@@ -141,11 +182,14 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
  * emails (for the Emails tab) and the events found in them (for the
  * confirmation screen). Ordered oldest-first so the app can show them
  * in the order they arrived. */
-async function handlePending(request: Request, env: Env): Promise<Response> {
+async function handlePending(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const household = await authenticateHousehold(request, env);
   if (!household) return json({ error: "unauthorized" }, 401);
 
-  await extractPendingEmails(env, household.id);
+  // Kick off extraction for any stragglers but DON'T wait on it — this
+  // response goes back immediately with whatever is already extracted.
+  // Anything still processing shows up on the next poll.
+  ctx.waitUntil(extractPendingEmails(env, household.id));
 
   // extractionStatus lets a client tell "this email genuinely had no dates"
   // from "extraction hasn't succeeded yet". Without it both render as an
@@ -198,14 +242,14 @@ async function handleAck(request: Request, env: Env): Promise<Response> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/v1/households" && request.method === "POST") {
       return handleProvision(request, env);
     }
     if (url.pathname === "/v1/pending" && request.method === "GET") {
-      return handlePending(request, env);
+      return handlePending(request, env, ctx);
     }
     if (url.pathname === "/v1/ack" && request.method === "POST") {
       return handleAck(request, env);
@@ -217,7 +261,7 @@ export default {
    * address on the ingest domain (wired up in the dashboard, not here —
    * see INGEST_BACKEND.md). Unknown recipients are rejected outright so
    * this can't become an open relay for storing arbitrary mail. */
-  async email(message: ForwardableEmailMessage, env: Env): Promise<void> {
+  async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
     const slug = (message.to ?? "").split("@")[0]?.toLowerCase() ?? "";
 
     const household = await env.DB.prepare("SELECT id FROM households WHERE ingest_slug = ?")
@@ -235,10 +279,10 @@ export default {
     const sender = parsed.from?.address ?? message.from ?? "";
     const receivedAt = new Date().toISOString();
 
-    // Store and return. Extraction happens later, on the app's next poll
-    // (see extractPendingEmails) — an LLM call here would put seconds of
-    // latency into the handler that decides whether Cloudflare accepts the
-    // message, and an API outage would start bouncing real school mail.
+    // Store first and let the message be accepted — an LLM call awaited here
+    // would put seconds of latency into the handler that decides whether
+    // Cloudflare takes the message, and an API outage would start bouncing
+    // real school mail.
     await env.DB.prepare(
       `INSERT INTO forwarded_emails (id, household_id, sender, subject, body_text, received_at)
        VALUES (?, ?, ?, ?, ?, ?)`
@@ -252,5 +296,10 @@ export default {
         receivedAt
       )
       .run();
+
+    // Then extract in the background. Mail arrives long before anyone opens
+    // the app, so in practice the events are ready and waiting by the time
+    // they look — without any request ever blocking on the model.
+    ctx.waitUntil(extractPendingEmails(env, household.id));
   },
 };
