@@ -37,7 +37,12 @@ const ExtractedEvent = z.object({
     .describe("Location and any detail worth keeping. Null if there is none."),
 });
 
-const Extraction = z.object({
+/** Exported so `scripts/schema-check.ts` can assert this actually converts to
+ * JSON Schema. That check exists because a zod major-version mismatch is
+ * invisible to `tsc` — the helper's types were satisfied by zod 3 while
+ * `betaZodOutputFormat` called `z.toJSONSchema()`, a zod 4 API, and threw at
+ * runtime on every extraction. Typecheck-green, production-broken. */
+export const Extraction = z.object({
   events: z.array(ExtractedEvent),
 });
 

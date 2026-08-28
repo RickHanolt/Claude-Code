@@ -24,7 +24,12 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: npm run typecheck
+      # `check` is typecheck + a runtime assertion that the extraction schema
+      # actually converts to JSON Schema. tsc alone can't catch a zod
+      # major-version mismatch — the SDK helper's types were satisfied by
+      # zod 3 while it called a zod 4 API, so extraction threw on every call
+      # in production while CI stayed green.
+      - run: npm run check
 
   # Deploys the Worker + applies D1 migrations. No-ops (not fails) until
   # CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID repo secrets are set — see

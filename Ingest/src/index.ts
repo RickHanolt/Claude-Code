@@ -147,8 +147,13 @@ async function handlePending(request: Request, env: Env): Promise<Response> {
 
   await extractPendingEmails(env, household.id);
 
+  // extractionStatus lets a client tell "this email genuinely had no dates"
+  // from "extraction hasn't succeeded yet". Without it both render as an
+  // empty event list, which is exactly how a zod version mismatch spent a
+  // day looking like a confident "no dates found".
   const emails = await env.DB.prepare(
-    `SELECT id, sender, subject, body_text as bodyText, received_at as receivedAt
+    `SELECT id, sender, subject, body_text as bodyText, received_at as receivedAt,
+            extraction_status as extractionStatus
      FROM forwarded_emails WHERE household_id = ? AND consumed_at IS NULL
      ORDER BY received_at ASC`
   )
