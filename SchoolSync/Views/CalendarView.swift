@@ -185,11 +185,22 @@ struct CalendarView: View {
     private func dayRow(day: Date, event: SchoolEventRecord, isFirstOfDay: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
             // The gutter keeps its width on EVERY row, not only the first.
-            // The marker is drawn once per day, but without the reserved
-            // space the day's second event would slide left and the timeline
-            // rule would zig-zag down the screen.
+            // The marker is drawn once per day, but without the reserved space
+            // the day's second event slides to the screen edge and the timeline
+            // rule zig-zags down the page.
+            //
+            // The empty branch has to be a real view. `if` with no `else`
+            // resolves to EmptyView, which SwiftUI never lays out, so the
+            // `.frame(width:)` below applies to nothing and reserves nothing —
+            // the modifier looks like it should hold the column open and
+            // silently doesn't. A 1pt clear box is a view with a size, so the
+            // frame has something to constrain.
             Group {
-                if isFirstOfDay { DayBlockLabel(date: day) }
+                if isFirstOfDay {
+                    DayBlockLabel(date: day)
+                } else {
+                    Color.clear.frame(width: dayColumnWidth, height: 1)
+                }
             }
             .frame(width: dayColumnWidth, alignment: .top)
 
