@@ -1,6 +1,7 @@
 import PostalMime from "postal-mime";
 import { extractEvents } from "./extractor";
 import { randomToken, sha256Hex } from "./auth";
+import { contentFingerprint, isDuplicateEvent, type ExistingEvent } from "./dedupe";
 
 export interface Env {
   DB: D1Database;
@@ -149,6 +150,43 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
         new Date(email.receivedAt)
       );
 
+      // Drop events this household already has. Two emails can describe the
+      // same event — a newsletter and the reminder that follows it — and each
+      // is extracted on its own, so the prompt's "merge duplicates" rule never
+      // sees both. Matching is by calendar day plus title overlap; see
+      // dedupe.ts for why containment rather than Jaccard.
+      //
+      // Consumed events count as existing. If it's already on the calendar,
+      // offering it again is the same annoyance as showing it twice here.
+      const existing = await env.DB.prepare(
+        `SELECT title, start_date as startDate FROM candidate_events
+         WHERE household_id = ? AND start_date >= ? AND start_date <= ?`
+      )
+        .bind(
+          householdID,
+          // Bounded by calendar day, not by the exact timestamps. Rows written
+          // before date normalization carry milliseconds (`...00.000Z`), and
+          // "." sorts BELOW "Z", so an exact-timestamp range would silently
+          // exclude a boundary row from the comparison it exists to be part of.
+          `${events.reduce((min, e) => (e.startDate < min ? e.startDate : min), "9999").slice(0, 10)}T00:00:00`,
+          `${events.reduce((max, e) => (e.startDate > max ? e.startDate : max), "0000").slice(0, 10)}T99`
+        )
+        .all<ExistingEvent>();
+
+      const seen: ExistingEvent[] = [...(existing.results ?? [])];
+      const fresh = [];
+
+      for (const event of events) {
+        // `seen` grows as we go, so a duplicate *within* one extraction is
+        // caught too — belt and braces behind the prompt rule.
+        if (isDuplicateEvent(event, seen)) {
+          console.log(`Skipping duplicate event: ${event.title} on ${event.startDate.slice(0, 10)}`);
+          continue;
+        }
+        seen.push({ title: event.title, startDate: event.startDate });
+        fresh.push(event);
+      }
+
       // The inserts and the status flip go in one atomic batch. Done
       // separately, a write that failed between them would leave the email
       // pending *with* its events already saved — and the retry would insert
@@ -161,7 +199,7 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
       );
 
       await env.DB.batch([
-        ...events.map((event) =>
+        ...fresh.map((event) =>
           insertEvent.bind(
             crypto.randomUUID(),
             email.id,
@@ -298,13 +336,31 @@ export default {
     const sender = parsed.from?.address ?? message.from ?? "";
     const receivedAt = new Date().toISOString();
 
+    // Forwarding one newsletter twice previously produced two rows, two model
+    // calls, and every event twice in the app. Accept the message either way —
+    // the mail was delivered correctly and bouncing it would be wrong — but
+    // don't store or extract a second copy.
+    const contentHash = await sha256Hex(contentFingerprint(subject, bodyText));
+
+    const alreadyStored = await env.DB.prepare(
+      "SELECT id FROM forwarded_emails WHERE household_id = ? AND content_hash = ?"
+    )
+      .bind(household.id, contentHash)
+      .first<{ id: string }>();
+
+    if (alreadyStored) {
+      console.log(`Ignoring duplicate forward of "${subject}" (matches ${alreadyStored.id}).`);
+      return;
+    }
+
     // Store first and let the message be accepted — an LLM call awaited here
     // would put seconds of latency into the handler that decides whether
     // Cloudflare takes the message, and an API outage would start bouncing
     // real school mail.
     await env.DB.prepare(
-      `INSERT INTO forwarded_emails (id, household_id, sender, subject, body_text, received_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO forwarded_emails
+         (id, household_id, sender, subject, body_text, received_at, content_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         crypto.randomUUID(),
@@ -312,7 +368,8 @@ export default {
         sender,
         subject || "(no subject)",
         bodyText,
-        receivedAt
+        receivedAt,
+        contentHash
       )
       .run();
 
