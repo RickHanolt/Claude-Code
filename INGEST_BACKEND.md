@@ -58,13 +58,35 @@ page in the dashboard, or under **Workers & Pages** → Overview.
 ## 6. Add GitHub repository secrets
 
 In this repo: **Settings → Secrets and variables → Actions → New repository
-secret**, add three:
+secret**, add four:
 
 | Name | Value |
 |---|---|
 | `CLOUDFLARE_API_TOKEN` | the token from step 5 |
 | `CLOUDFLARE_ACCOUNT_ID` | the account ID from step 5 |
 | `INGEST_ADMIN_TOKEN` | any long random string you make up — this becomes the password that protects the "create a household" endpoint. A password generator's output is fine; save it somewhere, you'll need it again in step 9. |
+| `ANTHROPIC_API_KEY` | from [console.anthropic.com](https://console.anthropic.com) → API Keys → Create Key. Powers event extraction (see below). |
+
+Paste each value straight into GitHub's form rather than through any
+intermediate — a secret that transits somewhere else is a secret you have to
+rotate.
+
+### About the Anthropic key
+
+Extraction reads each forwarded email and returns clean, de-duplicated
+events. It replaced a pattern-matching parser that, on a real school
+newsletter, produced 22 candidates from one email — duplicates of the same
+listing, sentence fragments as titles, and two entries dated 2014 because a
+comma-separated day list read as a year.
+
+Billing is pay-as-you-go with no monthly fee: you're charged per token used,
+which at a two-kid household's volume runs a few cents to a quarter a month.
+Most accounts need a small one-time deposit to activate billing.
+
+The key is optional in the sense that nothing breaks without it — the Worker
+still receives and stores every email, they still appear in the Emails tab,
+they just arrive with no events attached. Add the key later and the backlog
+extracts itself on the next sync.
 
 ## 7. Point the worker at your domain
 

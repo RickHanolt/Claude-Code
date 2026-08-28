@@ -1,10 +1,11 @@
 import PostalMime from "postal-mime";
-import { extractCandidateEvents } from "./dateParser";
+import { extractEvents } from "./extractor";
 import { randomToken, sha256Hex } from "./auth";
 
 export interface Env {
   DB: D1Database;
   ADMIN_TOKEN: string;
+  ANTHROPIC_API_KEY: string;
   INGEST_DOMAIN?: string;
 }
 
@@ -69,13 +70,82 @@ async function handleProvision(request: Request, env: Env): Promise<Response> {
   });
 }
 
+/** Runs extraction for any of this household's emails still marked pending,
+ * before the caller reads results back out.
+ *
+ * Deliberately best-effort: one email's failure must not fail the poll, and
+ * anything that doesn't reach 'done' stays pending so the next poll retries
+ * it. That means a missing or invalid API key degrades to "emails arrive with
+ * no events yet" rather than losing mail or erroring the app — and the
+ * backlog extracts itself once the key is fixed.
+ *
+ * Capped per request so a large backlog can't blow the Worker's time budget;
+ * successive polls chew through the rest. */
+async function extractPendingEmails(env: Env, householdID: string): Promise<void> {
+  if (!env.ANTHROPIC_API_KEY) return;
+
+  const pending = await env.DB.prepare(
+    `SELECT id, subject, body_text as bodyText, received_at as receivedAt
+     FROM forwarded_emails
+     WHERE household_id = ? AND extraction_status = 'pending'
+     ORDER BY received_at ASC
+     LIMIT 5`
+  )
+    .bind(householdID)
+    .all<{ id: string; subject: string; bodyText: string; receivedAt: string }>();
+
+  for (const email of pending.results ?? []) {
+    try {
+      const events = await extractEvents(
+        env.ANTHROPIC_API_KEY,
+        email.subject,
+        email.bodyText,
+        new Date(email.receivedAt)
+      );
+
+      // The inserts and the status flip go in one atomic batch. Done
+      // separately, a write that failed between them would leave the email
+      // pending *with* its events already saved — and the retry would insert
+      // them a second time. Batched, either the email is marked done with its
+      // events or nothing landed and the retry is clean.
+      const insertEvent = env.DB.prepare(
+        `INSERT INTO candidate_events
+           (id, forwarded_email_id, household_id, title, start_date, end_date, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      );
+
+      await env.DB.batch([
+        ...events.map((event) =>
+          insertEvent.bind(
+            crypto.randomUUID(),
+            email.id,
+            householdID,
+            event.title,
+            event.startDate,
+            event.endDate,
+            event.notes
+          )
+        ),
+        env.DB.prepare(
+          "UPDATE forwarded_emails SET extraction_status = 'done', extracted_at = ? WHERE id = ?"
+        ).bind(new Date().toISOString(), email.id),
+      ]);
+    } catch (error) {
+      // Left pending on purpose — the next poll tries again.
+      console.error(`Extraction failed for email ${email.id}:`, error);
+    }
+  }
+}
+
 /** Everything not yet acknowledged by the app for this household — full
- * emails (for the Emails tab) and the date candidates found in them (for
- * the confirmation screen). Ordered oldest-first so the app can show them
+ * emails (for the Emails tab) and the events found in them (for the
+ * confirmation screen). Ordered oldest-first so the app can show them
  * in the order they arrived. */
 async function handlePending(request: Request, env: Env): Promise<Response> {
   const household = await authenticateHousehold(request, env);
   if (!household) return json({ error: "unauthorized" }, 401);
+
+  await extractPendingEmails(env, household.id);
 
   const emails = await env.DB.prepare(
     `SELECT id, sender, subject, body_text as bodyText, received_at as receivedAt
@@ -160,31 +230,22 @@ export default {
     const sender = parsed.from?.address ?? message.from ?? "";
     const receivedAt = new Date().toISOString();
 
-    const emailId = crypto.randomUUID();
+    // Store and return. Extraction happens later, on the app's next poll
+    // (see extractPendingEmails) — an LLM call here would put seconds of
+    // latency into the handler that decides whether Cloudflare accepts the
+    // message, and an API outage would start bouncing real school mail.
     await env.DB.prepare(
       `INSERT INTO forwarded_emails (id, household_id, sender, subject, body_text, received_at)
        VALUES (?, ?, ?, ?, ?, ?)`
     )
-      .bind(emailId, household.id, sender, subject || "(no subject)", bodyText, receivedAt)
-      .run();
-
-    const candidates = extractCandidateEvents(subject, bodyText, new Date());
-    for (const candidate of candidates) {
-      await env.DB.prepare(
-        `INSERT INTO candidate_events
-           (id, forwarded_email_id, household_id, title, start_date, end_date, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      .bind(
+        crypto.randomUUID(),
+        household.id,
+        sender,
+        subject || "(no subject)",
+        bodyText,
+        receivedAt
       )
-        .bind(
-          crypto.randomUUID(),
-          emailId,
-          household.id,
-          candidate.title,
-          candidate.startDate,
-          candidate.endDate,
-          candidate.notes
-        )
-        .run();
-    }
+      .run();
   },
 };

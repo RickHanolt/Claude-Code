@@ -40,6 +40,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       INGEST_ADMIN_TOKEN: ${{ secrets.INGEST_ADMIN_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -74,3 +75,14 @@ jobs:
         env:
           INGEST_ADMIN_TOKEN: ${{ secrets.INGEST_ADMIN_TOKEN }}
         run: printf '%s' "$INGEST_ADMIN_TOKEN" | npx wrangler secret put ADMIN_TOKEN
+
+      # Powers event extraction. Deliberately not required: without it the
+      # Worker still receives and stores mail, just with no events attached,
+      # and the backlog extracts itself on the first poll after the key
+      # lands. Same printf-not-echo rule as above — `echo` appends a newline
+      # that becomes part of the stored secret.
+      - name: Sync ANTHROPIC_API_KEY worker secret
+        if: steps.check.outputs.skip == 'false' && env.ANTHROPIC_API_KEY != ''
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: printf '%s' "$ANTHROPIC_API_KEY" | npx wrangler secret put ANTHROPIC_API_KEY
