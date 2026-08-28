@@ -218,9 +218,21 @@ private struct PendingEmailConfirmView: View {
     @State private var selectedSchoolID: UUID?
     @State private var isSaving = false
 
-    init(email: PendingForwardedEmail, candidates: [PendingCandidateEvent], kids: [KidRecord], schools: [SchoolRecord], onSave: @escaping (UUID, UUID, Set<String>) async -> Void) {
+    // Hand-written because `_selectedIDs` has to be seeded from `candidates`,
+    // which suppresses the memberwise initializer — so every stored property
+    // added above must be assigned here too. Adding `exceptions` and missing
+    // this line is what broke the iOS build on 1580267.
+    init(
+        email: PendingForwardedEmail,
+        candidates: [PendingCandidateEvent],
+        exceptions: [PendingCandidateException],
+        kids: [KidRecord],
+        schools: [SchoolRecord],
+        onSave: @escaping (UUID, UUID, Set<String>) async -> Void
+    ) {
         self.email = email
         self.candidates = candidates
+        self.exceptions = exceptions
         self.kids = kids
         self.schools = schools
         self.onSave = onSave
