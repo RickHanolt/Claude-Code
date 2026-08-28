@@ -87,7 +87,7 @@ struct PendingReviewView: View {
                 title: candidate.title,
                 startDate: candidate.startDate,
                 endDate: candidate.endDate,
-                isAllDay: candidate.endDate == nil,
+                isAllDay: candidate.isAllDayEvent,
                 location: nil,
                 notes: candidate.notes,
                 kidID: kidID,
@@ -157,7 +157,7 @@ private struct PendingEmailConfirmView: View {
     /// stated. `endDate == nil` is already how this pipeline says "all-day"
     /// (see the isAllDay mapping below), so use it to drop the time entirely.
     private static func dateLabel(for candidate: PendingCandidateEvent) -> String {
-        candidate.endDate == nil
+        candidate.isAllDayEvent
             ? candidate.startDate.formatted(date: .abbreviated, time: .omitted)
             : candidate.startDate.formatted(date: .abbreviated, time: .shortened)
     }

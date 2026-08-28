@@ -21,6 +21,21 @@ struct PendingCandidateEvent: Codable, Identifiable, Hashable {
     var startDate: Date
     var endDate: Date?
     var notes: String?
+
+    /// Optional so a response from a backend that predates this field still
+    /// decodes — JSONDecoder fails the entire response on one missing required
+    /// key, which would hide every email behind a parse error rather than
+    /// degrading one field. Read it through `isAllDayEvent`, never directly.
+    var isAllDay: Bool?
+
+    /// All-day per the backend, falling back to the old inference.
+    ///
+    /// "No end time given" and "no time given at all" are different things, and
+    /// conflating them rendered a multi-day testing window as "12:00 PM" — the
+    /// local-noon anchor showing through as if it were a real start time. The
+    /// model now states which it meant; the fallback only applies to events
+    /// extracted before it did.
+    var isAllDayEvent: Bool { isAllDay ?? (endDate == nil) }
 }
 
 struct PendingResponse: Codable {

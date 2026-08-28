@@ -212,8 +212,8 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
       // events or nothing landed and the retry is clean.
       const insertEvent = env.DB.prepare(
         `INSERT INTO candidate_events
-           (id, forwarded_email_id, household_id, title, start_date, end_date, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+           (id, forwarded_email_id, household_id, title, start_date, end_date, is_all_day, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       );
 
       await env.DB.batch([
@@ -225,6 +225,7 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
             event.title,
             event.startDate,
             event.endDate,
+            event.isAllDay ? 1 : 0,
             event.notes
           )
         ),
@@ -292,7 +293,7 @@ async function handlePending(request: Request, env: Env, ctx: ExecutionContext):
 
   const events = await env.DB.prepare(
     `SELECT id, forwarded_email_id as forwardedEmailId, title, start_date as startDate,
-            end_date as endDate, notes
+            end_date as endDate, is_all_day as isAllDay, notes
      FROM candidate_events WHERE household_id = ? AND consumed_at IS NULL
      ORDER BY start_date ASC`
   )
@@ -306,7 +307,15 @@ async function handlePending(request: Request, env: Env, ctx: ExecutionContext):
   // Madzinski." and "Coach Craig Madzinski. Free for SMA students."), and
   // SQLite has no fuzzy comparison. Filtering here fixes what's queued without
   // deleting anything, so a matching mistake hides a row rather than losing it.
-  const events_ = (events.results ?? []) as Array<{ title: string; startDate: string }>;
+  // is_all_day is an INTEGER in SQLite and D1 hands it back as 0/1. The app
+  // decodes it into a Swift Bool, and JSONDecoder will not read a number as a
+  // Bool — it fails the WHOLE response, which is precisely how one date-only
+  // string once hid every email behind "the data couldn't be read". Convert at
+  // the boundary rather than shipping the storage type.
+  const events_ = (events.results ?? []).map((row) => {
+    const event = row as Record<string, unknown>;
+    return { ...event, isAllDay: Boolean(event.isAllDay) };
+  }) as Array<{ title: string; startDate: string; isAllDay: boolean }>;
 
   return json({ emails: emails.results, events: collapseDuplicates(events_) });
 }

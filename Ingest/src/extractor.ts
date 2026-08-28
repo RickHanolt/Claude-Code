@@ -37,6 +37,11 @@ const ExtractedEvent = z.object({
     .describe(
       "ISO 8601 end time (YYYY-MM-DDTHH:MM:SS), or null for an all-day or open-ended event."
     ),
+  isAllDay: z
+    .boolean()
+    .describe(
+      "True when the email gives no clock time, including a multi-day window like a testing week."
+    ),
   notes: z
     .string()
     .nullable()
@@ -82,7 +87,7 @@ Rules:
 - Ignore anything without a specific day. A heading like "September Schedule:" is not an event.
 - Title the event as a parent would say it. Do not use the email subject as a title, and do not copy a fragment of surrounding text.
 - Every clock time in a school email is local time in ${timeZone} (currently UTC${offset}). Attach that offset to every time you emit, e.g. a 3:00 p.m. practice is 2026-08-24T15:00:00${offset}. Never emit a time with no offset.
-- Set a time only when the email gives one; otherwise leave endDate null so it reads as all-day.
+- Set isAllDay true when the email gives no clock time. A multi-day window ("iReady testing Aug 31 - Sept 4") is all-day with a start and an end, not a timed event.
 - Put location and useful detail in notes. Null if there is nothing worth keeping.
 - If the email contains no real dated events, return an empty list. That is a valid and common answer.
 - Any attached calendars, flyers or schedules are part of this email. Read every date in them, not just the ones repeated in the body — a year-at-a-glance calendar listing sixty dates should produce sixty entries.

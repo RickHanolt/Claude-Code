@@ -1,0 +1,17 @@
+-- Say whether an event is all-day instead of inferring it from a null end.
+--
+-- "I-Ready Testing" is a multi-day window: no clock time, but it does have a
+-- start and an end. The app decided all-day by `endDate == nil`, so an event
+-- with both a date-only start AND a date-only end could not express itself —
+-- it rendered as "Aug 31 at 12:00 PM", a time the email never stated and which
+-- is really just the local-noon anchor showing through.
+--
+-- Inferring all-day from a missing end conflates two different things: "no end
+-- time given" and "no time given at all". The model knows which it meant, so
+-- it now says so.
+--
+-- Defaulted to 0 rather than backfilled from end_date IS NULL: every existing
+-- row was extracted under the old rule and the app already falls back to that
+-- same inference when the field is absent, so a backfill would only re-state a
+-- guess as though it were fact.
+ALTER TABLE candidate_events ADD COLUMN is_all_day INTEGER NOT NULL DEFAULT 0;

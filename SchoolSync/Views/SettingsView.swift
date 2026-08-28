@@ -11,6 +11,50 @@ struct SettingsView: View {
     @State private var ingestAPIKeyText: String = IngestSettings.apiKey ?? ""
     @State private var ingestSaved = false
 
+    @State private var isCleaningUp = false
+    @State private var cleanupResult: String?
+    @State private var showCleanupConfirm = false
+
+    /// Events still titled with an email's subject line, left behind by the
+    /// date-detector parser that predates Claude extraction.
+    ///
+    /// Matched on the subject prefix rather than on source or date, because
+    /// `.emailForward` is also what correctly-extracted events carry — the
+    /// prefix is the part no real event title has. Deliberately narrow: leaving
+    /// a stale row costs a duplicate, deleting a real one costs an event the
+    /// user never sees again.
+    @Query(filter: #Predicate<SchoolEventRecord> {
+        !$0.isDeletedByUser && ($0.title.starts(with: "Fwd:") || $0.title.starts(with: "Re:"))
+    })
+    private var staleEvents: [SchoolEventRecord]
+
+    /// Tombstones rather than deletes, for the same reason `CalendarView` does:
+    /// a hard delete lets the next sync from the same source re-insert the row,
+    /// since the source has no idea the user removed it.
+    ///
+    /// Skips anything the user has edited. If they took the trouble to fix a
+    /// badly-titled event by hand, it isn't stale any more and deleting it
+    /// would throw away their work.
+    private func cleanUpStaleEvents() {
+        isCleaningUp = true
+        defer { isCleaningUp = false }
+
+        let calendar = CalendarSyncService()
+        var removed = 0
+
+        for event in staleEvents where !event.isUserEdited {
+            if let identifier = event.calendarSyncIdentifier {
+                try? calendar.delete(eventIdentifier: identifier)
+            }
+            event.isDeletedByUser = true
+            event.calendarSyncIdentifier = nil
+            removed += 1
+        }
+
+        try? modelContext.save()
+        cleanupResult = "Removed \(removed) event\(removed == 1 ? "" : "s")."
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -75,6 +119,29 @@ struct SettingsView: View {
                     Text("Optional — only needed if you set up the auto-forward backend from INGEST_BACKEND.md. Values from step 9 there (the ingestAddress's Worker URL and the apiKey). Leave blank to keep sharing emails manually.")
                 }
 
+                if !staleEvents.isEmpty {
+                    Section {
+                        Button(role: .destructive) {
+                            showCleanupConfirm = true
+                        } label: {
+                            if isCleaningUp {
+                                ProgressView()
+                            } else {
+                                Text("Remove \(staleEvents.count) old-parser event\(staleEvents.count == 1 ? "" : "s")")
+                            }
+                        }
+                        .disabled(isCleaningUp)
+                    } header: {
+                        Text("Cleanup")
+                    } footer: {
+                        Text("Events still titled with an email's subject line (\"Fwd: …\"), left over from the parser used before Claude extraction. Removing them here also takes them out of your Calendar app.")
+                    }
+                }
+
+                if let cleanupResult {
+                    Section { Text(cleanupResult).font(.caption).foregroundStyle(.secondary) }
+                }
+
                 Section("About") {
                     Text("App Group: \(AppGroup.identifier)")
                         .font(.caption)
@@ -85,6 +152,16 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .confirmationDialog(
+                "Remove \(staleEvents.count) old-parser event\(staleEvents.count == 1 ? "" : "s")?",
+                isPresented: $showCleanupConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Remove", role: .destructive) { cleanUpStaleEvents() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This also removes them from your Calendar app. Events you've edited yourself are kept.")
+            }
         }
     }
 

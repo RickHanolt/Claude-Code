@@ -41,7 +41,18 @@ struct ShareConfirmationView: View {
         self.onCancel = onCancel
         _selectedIDs = State(initialValue: Set(candidates.map(\.id)))
 
-        let schema = Schema([KidRecord.self, SchoolRecord.self, SchoolEventRecord.self, ForwardedEmailRecord.self])
+        // Must list every model in the store, not just the ones this
+        // extension writes: the container is opened against the same App Group
+        // file as the main app, and a schema missing a model that exists on
+        // disk fails to open at all.
+        let schema = Schema([
+            KidRecord.self,
+            SchoolRecord.self,
+            SchoolEventRecord.self,
+            ForwardedEmailRecord.self,
+            KidDayDefaults.self,
+            DayException.self,
+        ])
         let configuration = ModelConfiguration(schema: schema, url: AppGroup.sharedModelStoreURL)
         self.modelContainer = try? ModelContainer(for: schema, configurations: [configuration])
     }
