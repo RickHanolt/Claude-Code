@@ -10,6 +10,9 @@ import SwiftUI
 /// They keep their views and move under Settings, so nothing became
 /// unreachable; only the ranking changed.
 struct ContentView: View {
+    @AppStorage(AppearanceSetting.storageKey, store: AppGroup.sharedDefaults)
+    private var appearanceRaw = AppearanceSetting.system.rawValue
+
     var body: some View {
         TabView {
             MorningModeView()
@@ -21,6 +24,10 @@ struct ContentView: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
+        // Applied here rather than per-screen: preferredColorScheme propagates
+        // up to the window, so one modifier at the root also covers every
+        // sheet and pushed view beneath it.
+        .preferredColorScheme(AppearanceSetting.resolve(appearanceRaw).colorScheme)
     }
 }
 

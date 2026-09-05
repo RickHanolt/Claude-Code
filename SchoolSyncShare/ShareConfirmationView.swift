@@ -25,6 +25,12 @@ struct ShareConfirmationView: View {
     @State private var kids: [KidRecord] = []
     @State private var schools: [SchoolRecord] = []
 
+    /// Read-only here — the extension honours the app's setting but has no
+    /// business changing it, and there's nowhere sensible to offer the choice
+    /// inside a share sheet.
+    @AppStorage(AppearanceSetting.storageKey, store: AppGroup.sharedDefaults)
+    private var appearanceRaw = AppearanceSetting.system.rawValue
+
     private let modelContainer: ModelContainer?
 
     init(
@@ -112,6 +118,7 @@ struct ShareConfirmationView: View {
             }
             .task { loadKidsAndSchools() }
         }
+        .preferredColorScheme(AppearanceSetting.resolve(appearanceRaw).colorScheme)
     }
 
     private func candidateRow(_ candidate: ParsedCandidateEvent) -> some View {

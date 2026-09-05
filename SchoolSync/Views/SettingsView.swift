@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var ingestAPIKeyText: String = IngestSettings.apiKey ?? ""
     @State private var ingestSaved = false
 
+    @AppStorage(AppearanceSetting.storageKey, store: AppGroup.sharedDefaults)
+    private var appearanceRaw = AppearanceSetting.system.rawValue
+
     @State private var isCleaningUp = false
     @State private var cleanupResult: String?
     @State private var showCleanupConfirm = false
@@ -156,6 +159,15 @@ struct SettingsView: View {
 
                 if let cleanupResult {
                     Section { Text(cleanupResult).font(.caption).foregroundStyle(.secondary) }
+                }
+
+                Section("Appearance") {
+                    Picker("Theme", selection: $appearanceRaw) {
+                        ForEach(AppearanceSetting.allCases) { option in
+                            Text(option.label).tag(option.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
 
                 Section("About") {

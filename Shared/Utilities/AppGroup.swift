@@ -21,6 +21,16 @@ enum AppGroup {
         return url
     }
 
+    /// Defaults shared with the share extension, for preferences both
+    /// processes need to agree on.
+    ///
+    /// Optional rather than force-unwrapped: `@AppStorage` falls back to
+    /// `.standard` when handed nil, so a misconfigured entitlement costs a
+    /// setting that doesn't cross into the extension rather than a crash.
+    static var sharedDefaults: UserDefaults? {
+        UserDefaults(suiteName: identifier)
+    }
+
     static var sharedModelStoreURL: URL {
         containerURL.appendingPathComponent("SchoolSync.sqlite")
     }
