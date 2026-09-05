@@ -246,6 +246,31 @@ private struct PendingEmailConfirmView: View {
 
     private var canSave: Bool { selectedKidID != nil && selectedSchoolID != nil }
 
+    /// Choose the school when there's only one it could be.
+    ///
+    /// School exists to attribute *events*, and a lunch calendar produces none
+    /// — so the picker was gating Save on an answer that didn't apply to the
+    /// document being reviewed. The principled fix is to stop requiring it,
+    /// but schoolID is a non-optional stored property on ForwardedEmailRecord
+    /// and this project has no SwiftData migration plan yet. Removing the
+    /// unnecessary question is worth less than the risk of a model change, so
+    /// this answers it instead when the answer is forced.
+    private func autoSelectSingleSchool() {
+        let options = eligibleSchools
+
+        if options.count == 1 {
+            selectedSchoolID = options[0].id
+            return
+        }
+
+        // Switching kids can leave the previous kid's school selected, which
+        // would silently file the email under a school it has nothing to do
+        // with.
+        if let current = selectedSchoolID, !options.contains(where: { $0.id == current }) {
+            selectedSchoolID = nil
+        }
+    }
+
     /// An all-day candidate has no meaningful clock time, so don't invent one.
     ///
     /// The backend anchors a date-only event at noon UTC deliberately: naive
@@ -292,6 +317,12 @@ private struct PendingEmailConfirmView: View {
                             .foregroundStyle(.secondary)
                     } else if let error = email.extractionError {
                         Text("Couldn't read this email: \(error)")
+                            .foregroundStyle(.secondary)
+                    } else if !exceptions.isEmpty {
+                        // "No dates found" printed directly above two daily
+                        // changes reads as a contradiction. Nothing went on the
+                        // calendar, but something was certainly found.
+                        Text("Nothing for the calendar — what this one carries is in Daily changes below.")
                             .foregroundStyle(.secondary)
                     } else if email.attachmentNote != nil {
                         Text("Nothing found in the message text, and the attachment above wasn't readable.")
@@ -383,6 +414,8 @@ private struct PendingEmailConfirmView: View {
         }
         .navigationTitle("Review")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { autoSelectSingleSchool() }
+        .onChange(of: selectedKidID) { _, _ in autoSelectSingleSchool() }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button {
