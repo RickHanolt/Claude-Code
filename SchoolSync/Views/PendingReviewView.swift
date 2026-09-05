@@ -9,6 +9,7 @@ struct PendingReviewView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \KidRecord.name) private var kids: [KidRecord]
     @Query(sort: \SchoolRecord.name) private var schools: [SchoolRecord]
+    @Query private var senderRoutes: [SenderRoute]
 
     @State private var emails: [PendingForwardedEmail] = []
     @State private var eventsByEmail: [String: [PendingCandidateEvent]] = [:]
@@ -33,6 +34,7 @@ struct PendingReviewView: View {
                             exceptions: exceptionsByEmail[email.id] ?? [],
                             kids: kids,
                             schools: schools,
+                            suggestion: route(for: email),
                             onSave: { kidID, schoolID, checkedEventIDs in
                                 await save(email: email, kidID: kidID, schoolID: schoolID, checkedEventIDs: checkedEventIDs)
                             }
@@ -78,6 +80,41 @@ struct PendingReviewView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// What this sender's mail turned out to be about last time.
+    ///
+    /// Only a suggestion: it pre-fills the pickers, which stay editable, and
+    /// a stale route pointing at a deleted kid or a school that no longer
+    /// belongs to them is discarded here rather than offered.
+    private func route(for email: PendingForwardedEmail) -> SenderRoute? {
+        guard let sender = SenderRoute.normalize(email.sender),
+              let match = senderRoutes.first(where: { $0.sender == sender }),
+              kids.contains(where: { $0.id == match.kidID }),
+              schools.contains(where: { $0.id == match.schoolID && $0.kidID == match.kidID })
+        else { return nil }
+
+        return match
+    }
+
+    /// Remembers the choice so the next email from this sender arrives with
+    /// the answer already filled in.
+    ///
+    /// Written on save rather than on selection: a kid picked and then changed
+    /// before saving was never the answer, and learning from it would teach the
+    /// app a choice the user visibly rejected.
+    private func rememberRoute(sender: String?, kidID: UUID, schoolID: UUID) {
+        guard let sender = SenderRoute.normalize(sender) else { return }
+
+        if let existing = senderRoutes.first(where: { $0.sender == sender }) {
+            existing.kidID = kidID
+            existing.schoolID = schoolID
+            existing.updatedAt = .now
+        } else {
+            modelContext.insert(SenderRoute(sender: sender, kidID: kidID, schoolID: schoolID))
+        }
+
+        try? modelContext.save()
     }
 
     /// Writes day exceptions into the local store.
@@ -189,6 +226,8 @@ struct PendingReviewView: View {
         let exceptions = exceptionsByEmail[email.id] ?? []
         saveExceptions(exceptions, kidID: kidID, subject: email.subject)
 
+        rememberRoute(sender: email.sender, kidID: kidID, schoolID: schoolID)
+
         if let client = IngestClient.configured() {
             try? await client.acknowledge(
                 emailIDs: [email.id],
@@ -211,6 +250,11 @@ private struct PendingEmailConfirmView: View {
     let exceptions: [PendingCandidateException]
     let kids: [KidRecord]
     let schools: [SchoolRecord]
+
+    /// What this sender's mail meant last time, or nil if it's never been
+    /// assigned. Pre-fills the pickers; it does not bypass them.
+    let suggestion: SenderRoute?
+
     let onSave: (UUID, UUID, Set<String>) async -> Void
 
     @State private var selectedIDs: Set<String>
@@ -228,6 +272,7 @@ private struct PendingEmailConfirmView: View {
         exceptions: [PendingCandidateException],
         kids: [KidRecord],
         schools: [SchoolRecord],
+        suggestion: SenderRoute?,
         onSave: @escaping (UUID, UUID, Set<String>) async -> Void
     ) {
         self.email = email
@@ -235,8 +280,11 @@ private struct PendingEmailConfirmView: View {
         self.exceptions = exceptions
         self.kids = kids
         self.schools = schools
+        self.suggestion = suggestion
         self.onSave = onSave
         _selectedIDs = State(initialValue: Set(candidates.map(\.id)))
+        _selectedKidID = State(initialValue: suggestion?.kidID)
+        _selectedSchoolID = State(initialValue: suggestion?.schoolID)
     }
 
     private var eligibleSchools: [SchoolRecord] {
@@ -257,6 +305,14 @@ private struct PendingEmailConfirmView: View {
     /// this answers it instead when the answer is forced.
     private func autoSelectSingleSchool() {
         let options = eligibleSchools
+
+        // Idempotent on purpose: a school already chosen — by the user, or
+        // carried in from this sender's remembered route — is left alone, so
+        // this can run on appear and on every kid change without fighting
+        // whatever set it.
+        if let current = selectedSchoolID, options.contains(where: { $0.id == current }) {
+            return
+        }
 
         if options.count == 1 {
             selectedSchoolID = options[0].id
@@ -408,6 +464,17 @@ private struct PendingEmailConfirmView: View {
                             Text("None").tag(UUID?.none)
                             ForEach(eligibleSchools) { school in Text(school.name).tag(Optional(school.id)) }
                         }
+                    }
+
+                    // Say where a pre-filled answer came from. An app that
+                    // silently fills in a child's name is one you have to
+                    // double-check every time; one that says why it guessed is
+                    // one you can trust at a glance and correct when it's
+                    // wrong.
+                    if let suggestion, selectedKidID == suggestion.kidID {
+                        Text("Filled in from the last email you assigned from this sender.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }

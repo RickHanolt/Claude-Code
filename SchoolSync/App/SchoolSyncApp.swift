@@ -11,6 +11,7 @@ struct SchoolSyncApp: App {
             ForwardedEmailRecord.self,
             KidDayDefaults.self,
             DayException.self,
+            SenderRoute.self,
         ])
         let configuration = ModelConfiguration(schema: schema, url: AppGroup.sharedModelStoreURL)
         do {

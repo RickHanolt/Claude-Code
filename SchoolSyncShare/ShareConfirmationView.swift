@@ -52,6 +52,7 @@ struct ShareConfirmationView: View {
             ForwardedEmailRecord.self,
             KidDayDefaults.self,
             DayException.self,
+            SenderRoute.self,
         ])
         let configuration = ModelConfiguration(schema: schema, url: AppGroup.sharedModelStoreURL)
         self.modelContainer = try? ModelContainer(for: schema, configurations: [configuration])
