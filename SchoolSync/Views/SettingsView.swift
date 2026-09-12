@@ -81,6 +81,9 @@ struct SettingsView: View {
                     NavigationLink { SendersListView() } label: {
                         Label("Senders", systemImage: "tray.and.arrow.down")
                     }
+                    NavigationLink { DayExceptionsView() } label: {
+                        Label("Day changes", systemImage: "calendar.badge.exclamationmark")
+                    }
                 }
 
                 Section("Calendar Access") {
