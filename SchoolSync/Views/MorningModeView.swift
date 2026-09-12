@@ -17,7 +17,42 @@ struct MorningModeView: View {
 
     @State private var isPresentingAddKid = false
 
+    /// Days either side of today that can be swiped to.
+    ///
+    /// Bounded because a paging TabView needs a finite set of pages, and these
+    /// are the bounds that match the data: a fortnight back covers "what did we
+    /// miss", and a school year forward covers everything the semester calendar
+    /// and the district PDF put in the store. Past that there is nothing to
+    /// show and swiping would only find empty days.
+    private static let daysBack = 14
+    private static let daysForward = 300
+
+    /// Which day is on screen, as an offset from today. Zero is today, and the
+    /// Today button exists because after a few swipes it stops being obvious
+    /// which way back is.
+    @State private var dayOffset = 0
+
     private var today: Date { Calendar.current.startOfDay(for: .now) }
+
+    private func date(forOffset offset: Int) -> Date {
+        Calendar.current.date(byAdding: .day, value: offset, to: today) ?? today
+    }
+
+    private var selectedDay: Date { date(forOffset: dayOffset) }
+
+    /// "Today", "Tomorrow", or the weekday and date.
+    ///
+    /// The relative words matter more than they look: once the screen can show
+    /// any day, the title is the only thing stopping you from reading
+    /// tomorrow's gym shoes as this morning's.
+    private var title: String {
+        switch dayOffset {
+        case 0: "Today"
+        case 1: "Tomorrow"
+        case -1: "Yesterday"
+        default: selectedDay.formatted(.dateTime.weekday(.abbreviated).month().day())
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -32,35 +67,31 @@ struct MorningModeView: View {
                     VStack(spacing: 0) {
                         WeatherStrip()
 
-                        // Equal division rather than a scroll: the point is a
-                        // glance, and a screen you have to scroll to finish
-                        // reading is a screen you'll skip on a school morning.
-                        // Past two kids that stops being possible, so it falls
-                        // back to scrolling rather than shrinking to unreadable.
-                        if kids.count <= 2 {
-                            VStack(spacing: 0) {
-                                ForEach(Array(kids.enumerated()), id: \.element.id) { index, kid in
-                                    if index > 0 { Divider() }
-                                    KidPanel(kid: kid, plan: plan(for: kid), events: todaysEvents(for: kid))
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                }
-                            }
-                        } else {
-                            ScrollView {
-                                VStack(spacing: 0) {
-                                    ForEach(Array(kids.enumerated()), id: \.element.id) { index, kid in
-                                        if index > 0 { Divider() }
-                                        KidPanel(kid: kid, plan: plan(for: kid), events: todaysEvents(for: kid))
-                                    }
-                                }
+                        // A paging TabView rather than a swipe gesture: it
+                        // tracks the finger, rubber-bands at the ends, and
+                        // behaves the way every other iOS page does, none of
+                        // which a DragGesture gives for free. Index dots are
+                        // off — three hundred of them would be nonsense.
+                        TabView(selection: $dayOffset) {
+                            ForEach(-Self.daysBack...Self.daysForward, id: \.self) { offset in
+                                dayView(for: date(forOffset: offset))
+                                    .tag(offset)
                             }
                         }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
                     }
                 }
             }
-            .navigationTitle(today.formatted(.dateTime.weekday(.wide).month().day()))
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    if dayOffset != 0 {
+                        Button("Today") {
+                            withAnimation { dayOffset = 0 }
+                        }
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button { isPresentingAddKid = true } label: { Image(systemName: "plus") }
                 }
@@ -69,26 +100,54 @@ struct MorningModeView: View {
         }
     }
 
-    private func plan(for kid: KidRecord) -> DayPlan {
+    /// One day's panels.
+    @ViewBuilder
+    private func dayView(for day: Date) -> some View {
+        // Equal division rather than a scroll: the point is a glance, and a
+        // screen you have to scroll to finish reading is a screen you'll skip
+        // on a school morning. Past two kids that stops being possible, so it
+        // falls back to scrolling rather than shrinking to unreadable.
+        if kids.count <= 2 {
+            VStack(spacing: 0) {
+                ForEach(Array(kids.enumerated()), id: \.element.id) { index, kid in
+                    if index > 0 { Divider() }
+                    KidPanel(kid: kid, plan: plan(for: kid, on: day), events: calendarEvents(for: kid, on: day))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        } else {
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(kids.enumerated()), id: \.element.id) { index, kid in
+                        if index > 0 { Divider() }
+                        KidPanel(kid: kid, plan: plan(for: kid, on: day), events: calendarEvents(for: kid, on: day))
+                    }
+                }
+            }
+        }
+    }
+
+    private func plan(for kid: KidRecord, on day: Date) -> DayPlan {
         DayPlanResolver.resolve(
             kidID: kid.id,
-            day: today,
+            day: day,
             defaults: dayDefaults.first { $0.kidID == kid.id },
             exceptions: exceptions
         )
     }
 
-    /// Today's calendar events for one kid.
+    /// One kid's calendar events on a given day.
     ///
-    /// Surfaced alongside the resolved reminders because an event happening
-    /// today IS a morning reminder — picture day is the thing you'd want to
-    /// know at breakfast. This is also what makes the screen useful before
-    /// Phase 4 wires up menus and the rotation: the calendar already has real
-    /// events in it.
-    private func todaysEvents(for kid: KidRecord) -> [SchoolEventRecord] {
+    /// Named to avoid shadowing the `events` query it reads from — legal in
+    /// Swift, confusing to read.
+    ///
+    /// Surfaced alongside the resolved reminders because an event on a day IS
+    /// a morning reminder — picture day is the thing you'd want to know at
+    /// breakfast.
+    private func calendarEvents(for kid: KidRecord, on day: Date) -> [SchoolEventRecord] {
         let calendar = Calendar.current
         return events
-            .filter { $0.kidID == kid.id && calendar.isDate($0.startDate, inSameDayAs: today) }
+            .filter { $0.kidID == kid.id && calendar.isDate($0.startDate, inSameDayAs: day) }
             .sorted { $0.startDate < $1.startDate }
     }
 }
@@ -123,47 +182,54 @@ private struct KidPanel: View {
     private var accent: Color { Color(hex: kid.colorHex) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            BlockWord(word: kid.name, colorSeed: kid.name.count, sizes: [20, 17, 14, 12])
+        // Scrolls only when it has to. Larger type, a rotation reminder and a
+        // couple of events can together outgrow half a screen, and a clipped
+        // panel would hide exactly the line this app exists to show. Bounce is
+        // size-based so a panel that fits still feels fixed rather than loose.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                BlockWord(word: kid.name, colorSeed: kid.name.count, sizes: [24, 21, 18, 15])
 
-            VStack(alignment: .leading, spacing: 7) {
-                FieldRow(field: plan.breakfast, accent: accent)
-                FieldRow(field: plan.lunch, accent: accent)
-                FieldRow(field: plan.clothing, accent: accent)
-            }
-
-            if plan.reminders.isEmpty && events.isEmpty {
-                // Say it rather than leaving a gap. An empty panel is
-                // ambiguous — it could mean "nothing unusual" or "this failed
-                // to load", and at 7am you shouldn't have to work out which.
-                // Silence only functions as a signal when it's distinguishable
-                // from a bug.
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Text("Nothing unusual today")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 7) {
+                    FieldRow(field: plan.breakfast, accent: accent)
+                    FieldRow(field: plan.lunch, accent: accent)
+                    FieldRow(field: plan.clothing, accent: accent)
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 5) {
-                    ForEach(plan.reminders, id: \.value) { reminder in
-                        ReminderRow(text: reminder.value, isException: reminder.isException, accent: accent)
-                    }
 
-                    // Events always read as notable — an event on the calendar
-                    // today is by definition not part of an ordinary day.
-                    ForEach(events) { event in
-                        ReminderRow(text: eventLabel(event), isException: true, accent: accent)
+                if plan.reminders.isEmpty && events.isEmpty {
+                    // Say it rather than leaving a gap. An empty panel is
+                    // ambiguous — it could mean "nothing unusual" or "this failed
+                    // to load", and at 7am you shouldn't have to work out which.
+                    // Silence only functions as a signal when it's distinguishable
+                    // from a bug.
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Text("Nothing unusual")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(plan.reminders, id: \.value) { reminder in
+                            ReminderRow(text: reminder.value, isException: reminder.isException, accent: accent)
+                        }
+
+                        // Events always read as notable — an event on the calendar
+                        // is by definition not part of an ordinary day.
+                        ForEach(events) { event in
+                            ReminderRow(text: eventLabel(event), isException: true, accent: accent)
+                        }
                     }
                 }
-            }
 
-            Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             // A faint tint of the kid's own colour. Without a boundary the
             // panel's unused half-screen reads as emptiness; with one it reads
@@ -186,13 +252,13 @@ private struct FieldRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(field.field.label)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .frame(width: 68, alignment: .leading)
+                .frame(width: 84, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(field.value.isEmpty ? "—" : field.value)
-                    .font(.subheadline)
+                    .font(.body)
                     // Weight is the whole signal. A day where nothing differs
                     // should read as flat grey text you can skim past.
                     .fontWeight(field.isException ? .semibold : .regular)
@@ -201,7 +267,7 @@ private struct FieldRow: View {
 
                 if field.isException, let provenance = field.provenance {
                     Text(provenance)
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -209,7 +275,7 @@ private struct FieldRow: View {
             Spacer(minLength: 0)
 
             if field.isException {
-                Circle().fill(accent).frame(width: 6, height: 6)
+                Circle().fill(accent).frame(width: 7, height: 7)
             }
         }
     }
@@ -223,11 +289,11 @@ private struct ReminderRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: isException ? "exclamationmark.circle.fill" : "circle")
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(isException ? accent : Color.secondary)
 
             Text(text)
-                .font(.caption)
+                .font(.subheadline)
                 .fontWeight(isException ? .medium : .regular)
                 .foregroundStyle(isException ? .primary : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
