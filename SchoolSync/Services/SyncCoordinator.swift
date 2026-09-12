@@ -40,7 +40,7 @@ struct SyncCoordinator {
         // PendingReviewView handle the actual review/save.
         if let client = IngestClient.configured() {
             if let pending = try? await client.fetchPending() {
-                result.pendingReviewCount = pending.emails.count
+                result.pendingReviewCount = await autoAcceptRoutedMail(pending, client: client, into: &result)
             }
         }
 
@@ -98,5 +98,89 @@ struct SyncCoordinator {
         }
 
         return result
+    }
+
+    /// Saves mail from senders whose kid is already known, and returns how many
+    /// emails still need a person.
+    ///
+    /// The review screen exists because the backend deliberately has no idea
+    /// which child an email is about — that answer only ever lived on the
+    /// phone. Once a sender has been assigned even once, it isn't a question
+    /// any more, and asking again every week is the app making work rather
+    /// than removing it.
+    ///
+    /// Deliberately gated on a learned route rather than a blanket "accept
+    /// everything". The first mail from any address still gets reviewed, which
+    /// doubles as the safety valve: an unfamiliar sender, or a school whose
+    /// address changed, can't write to a calendar unsupervised.
+    private func autoAcceptRoutedMail(
+        _ pending: PendingResponse,
+        client: IngestClient,
+        into result: inout SyncResult
+    ) async -> Int {
+        guard AutoAcceptSetting.isEnabled else { return pending.emails.count }
+
+        let context = modelContext
+        let routes = (try? context.fetch(FetchDescriptor<SenderRoute>())) ?? []
+        let kids = (try? context.fetch(FetchDescriptor<KidRecord>())) ?? []
+        let schools = (try? context.fetch(FetchDescriptor<SchoolRecord>())) ?? []
+        guard !routes.isEmpty else { return pending.emails.count }
+
+        let eventsByEmail = Dictionary(grouping: pending.events, by: \.forwardedEmailId)
+        let exceptionsByEmail = Dictionary(grouping: pending.exceptions ?? [], by: \.forwardedEmailId)
+        let ingestor = PendingIngestor(modelContext: context)
+
+        var needsReview = 0
+
+        for email in pending.emails {
+            // Anything the model hasn't finished reading yet is left alone. Its
+            // event list is empty for a reason that has nothing to do with the
+            // email's contents, and accepting it now would file it as "nothing
+            // to see" permanently.
+            if email.isStillExtracting {
+                needsReview += 1
+                continue
+            }
+
+            guard
+                let sender = SenderRoute.normalize(email.sender),
+                let route = routes.first(where: { $0.sender == sender }),
+                kids.contains(where: { $0.id == route.kidID }),
+                schools.contains(where: { $0.id == route.schoolID && $0.kidID == route.kidID })
+            else {
+                needsReview += 1
+                continue
+            }
+
+            let candidates = eventsByEmail[email.id] ?? []
+            let exceptions = exceptionsByEmail[email.id] ?? []
+
+            let saved = ingestor.save(
+                email: email,
+                candidates: candidates,
+                // Everything, because nobody is here to uncheck anything. An
+                // event that shouldn't be there is deletable on the calendar;
+                // one that never arrived is invisible.
+                checkedEventIDs: Set(candidates.map(\.id)),
+                exceptions: exceptions,
+                kidID: route.kidID,
+                schoolID: route.schoolID
+            )
+
+            // Say what was added. Mail that files itself is only an improvement
+            // while it's still possible to notice what it did.
+            let kidName = kids.first { $0.id == route.kidID }?.name ?? "a kid"
+            result.notes.append(
+                "Added \(saved.eventCount) event(s) for \(kidName) from \"\(email.subject)\" automatically."
+            )
+
+            try? await client.acknowledge(
+                emailIDs: [email.id],
+                eventIDs: saved.eventIDs,
+                exceptionIDs: saved.exceptionIDs
+            )
+        }
+
+        return needsReview
     }
 }

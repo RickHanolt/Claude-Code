@@ -14,6 +14,9 @@ struct SettingsView: View {
     @AppStorage(AppearanceSetting.storageKey, store: AppGroup.sharedDefaults)
     private var appearanceRaw = AppearanceSetting.system.rawValue
 
+    @AppStorage(AutoAcceptSetting.storageKey, store: AppGroup.sharedDefaults)
+    private var autoAcceptRoutedMail = true
+
     @State private var isCleaningUp = false
     @State private var cleanupResult: String?
     @State private var showCleanupConfirm = false
@@ -162,6 +165,12 @@ struct SettingsView: View {
 
                 if let cleanupResult {
                     Section { Text(cleanupResult).font(.caption).foregroundStyle(.secondary) }
+                }
+
+                Section {
+                    Toggle("File mail from known senders automatically", isOn: $autoAcceptRoutedMail)
+                } footer: {
+                    Text("Once you've assigned an email from an address to a kid, later mail from that address is saved without asking. The first email from any new sender is always reviewed by hand.")
                 }
 
                 Section("Appearance") {
