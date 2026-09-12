@@ -110,6 +110,9 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        ForEach(result.notes, id: \.self) { note in
+                            Text(note).font(.caption).foregroundStyle(.secondary)
+                        }
                         ForEach(result.errors, id: \.self) { error in
                             Text(error).font(.caption).foregroundStyle(.red)
                         }

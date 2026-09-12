@@ -4,6 +4,12 @@ import SwiftData
 struct SyncResult {
     var eventsIngested: Int = 0
     var errors: [String] = []
+
+    /// Things worth saying that aren't failures — a feed that loaded but held
+    /// nothing. Separate from `errors` so a legitimately empty calendar isn't
+    /// printed in red, and so "nothing came back" stops being silent.
+    var notes: [String] = []
+
     var pendingReviewCount: Int = 0
 }
 
@@ -47,6 +53,13 @@ struct SyncCoordinator {
             if let url = school.icsFeedURL {
                 do {
                     let events = try await ICSFeedService().fetchEvents(from: url, kidID: school.kidID, schoolID: school.id)
+                    // A valid calendar with nothing in it is legitimate — an
+                    // empty month, a feed that only publishes next term. Say
+                    // so anyway: the alternative is a sync that reports
+                    // success while one child's calendar quietly stays empty.
+                    if events.isEmpty {
+                        result.notes.append("\(school.name): calendar loaded, but it lists no events.")
+                    }
                     result.eventsIngested += try eventStore.upsert(events)
                 } catch {
                     result.errors.append("\(school.name) (ICS feed): \(error.localizedDescription)")
