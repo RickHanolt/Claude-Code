@@ -43,9 +43,16 @@ struct EditEventView: View {
                     selection: $startDate,
                     displayedComponents: isAllDay ? [.date] : [.date, .hourAndMinute]
                 )
-                if !isAllDay {
-                    DatePicker("Ends", selection: $endDate, in: startDate..., displayedComponents: [.date, .hourAndMinute])
-                }
+                // Shown for all-day events too, without a time. A school
+                // closure can run several days — the CPS calendar's emergency
+                // days do — and hiding the end date meant a multi-day event
+                // was indistinguishable from a single one.
+                DatePicker(
+                    "Ends",
+                    selection: $endDate,
+                    in: startDate...,
+                    displayedComponents: isAllDay ? [.date] : [.date, .hourAndMinute]
+                )
                 TextField("Location", text: $location)
             }
 
@@ -74,7 +81,17 @@ struct EditEventView: View {
         event.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         event.isAllDay = isAllDay
         event.startDate = startDate
-        event.endDate = isAllDay ? nil : endDate
+        // Never discard a range. This previously wrote nil for every all-day
+        // event, so opening a three-day closure and tapping Save — with the
+        // end date not even on screen — silently shortened it to one day.
+        //
+        // Still nil when start and end are the same day, so an ordinary
+        // one-day event doesn't acquire a span it never had.
+        if isAllDay {
+            event.endDate = Calendar.current.isDate(endDate, inSameDayAs: startDate) ? nil : endDate
+        } else {
+            event.endDate = endDate
+        }
         let trimmedLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
         event.location = trimmedLocation.isEmpty ? nil : trimmedLocation
         let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
