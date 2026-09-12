@@ -17,14 +17,19 @@ const PDF_TYPE = "application/pdf";
 
 type SupportedImageType = (typeof SUPPORTED_IMAGE_TYPES)[number];
 
-/** Base64 length cap per attachment, ~900KB of original bytes.
+/** Base64 length cap per attachment, ~1.35MB of original bytes.
  *
- * Two things are being bounded, and the tighter one wins: D1's per-value
- * ceiling, and the input-token cost of handing a large scan to Opus. A
- * one-page flyer or a year calendar sits far below this; anything above it is
- * a photo album or a scanned packet, and silently skipping with a log beats
- * either a failed insert or a surprise bill. */
-const MAX_BASE64_LENGTH = 1_200_000;
+ * Bounded by D1's 2MB per-value ceiling, with headroom. The original 1.2M
+ * guess was written around the phrase "a year calendar sits far below this",
+ * which turned out to be wrong the first time a real one appeared: the CPS
+ * district family calendar is 878KB, or 98% of that cap — it would have
+ * depended on what the mail path did to it on the way through.
+ *
+ * The cost argument the old cap also rested on doesn't hold either. A
+ * two-page PDF is a few thousand input tokens whatever its byte size; what
+ * actually runs up a bill is page count, which this doesn't bound and
+ * shouldn't pretend to. */
+const MAX_BASE64_LENGTH = 1_800_000;
 
 /** Images below this are signature logos, social icons and tracking pixels,
  * which every school email carries and none of which contain a date. Cost
