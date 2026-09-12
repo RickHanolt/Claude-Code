@@ -5,7 +5,24 @@ struct SchoolsListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \SchoolRecord.name) private var schools: [SchoolRecord]
     @Query(sort: \KidRecord.name) private var kids: [KidRecord]
-    @State private var isPresentingAddSchool = false
+    /// One sheet, two purposes.
+    ///
+    /// Two separate `.sheet` modifiers on the same view have a long history of
+    /// only the last one working, and that's not something this project can
+    /// test before it's on a device. A single item-driven sheet sidesteps it.
+    private enum SchoolSheet: Identifiable {
+        case add
+        case edit(SchoolRecord)
+
+        var id: String {
+            switch self {
+            case .add: "add"
+            case .edit(let school): school.id.uuidString
+            }
+        }
+    }
+
+    @State private var sheet: SchoolSheet?
 
     private var kidsByID: [UUID: KidRecord] { Dictionary(uniqueKeysWithValues: kids.map { ($0.id, $0) }) }
 
@@ -27,25 +44,45 @@ struct SchoolsListView: View {
                 } else {
                     List {
                         ForEach(schools) { school in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(school.name).font(.body)
-                                Text(kidsByID[school.kidID]?.name ?? "Unknown kid")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                HStack(spacing: 6) {
-                                    if school.icsFeedURL != nil {
-                                        Label("ICS feed", systemImage: "dot.radiowaves.up.forward")
+                            Button {
+                                sheet = .edit(school)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(school.name).font(.body)
+                                    Text(kidsByID[school.kidID]?.name ?? "Unknown kid")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    HStack(spacing: 6) {
+                                        if school.icsFeedURL != nil {
+                                            Label("ICS feed", systemImage: "dot.radiowaves.up.forward")
+                                        }
+                                        if school.scrapeURL != nil {
+                                            Label("Scrape", systemImage: "text.viewfinder")
+                                        }
+                                        if school.acceptsEmailForwarding {
+                                            Label("Email", systemImage: "envelope")
+                                        }
                                     }
-                                    if school.scrapeURL != nil {
-                                        Label("Scrape", systemImage: "text.viewfinder")
-                                    }
-                                    if school.acceptsEmailForwarding {
-                                        Label("Email", systemImage: "envelope")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+
+                                    // Show the actual URL, not just that one
+                                    // exists. A school was configured with its
+                                    // site's news RSS endpoint rather than its
+                                    // calendar, and this row said "ICS feed"
+                                    // the whole time — the one fact that would
+                                    // have given it away was the one fact not
+                                    // on screen.
+                                    if let feed = school.icsFeedURLString, !feed.isEmpty {
+                                        Text(feed)
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
                                     }
                                 }
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
                             }
+                            .buttonStyle(.plain)
                         }
                         .onDelete(perform: deleteSchools)
                     }
@@ -54,12 +91,17 @@ struct SchoolsListView: View {
             .navigationTitle("Schools")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button { isPresentingAddSchool = true } label: { Image(systemName: "plus") }
+                    Button { sheet = .add } label: { Image(systemName: "plus") }
                         .disabled(kids.isEmpty)
                 }
             }
-            .sheet(isPresented: $isPresentingAddSchool) {
-                AddSchoolView(kids: kids)
+            .sheet(item: $sheet) { item in
+                switch item {
+                case .add:
+                    AddSchoolView(kids: kids)
+                case .edit(let school):
+                    AddSchoolView(kids: kids, existing: school)
+                }
             }
         }
     }

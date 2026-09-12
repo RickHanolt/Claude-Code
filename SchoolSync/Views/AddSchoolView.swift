@@ -7,6 +7,13 @@ struct AddSchoolView: View {
 
     let kids: [KidRecord]
 
+    /// The school being edited, or nil when adding a new one.
+    ///
+    /// One form for both, because they ask exactly the same questions. A
+    /// separate EditSchoolView would be the same fields twice, and the two
+    /// copies would drift the first time a field is added to one of them.
+    var existing: SchoolRecord? = nil
+
     @State private var selectedKidID: UUID?
     @State private var name = ""
 
@@ -23,6 +30,10 @@ struct AddSchoolView: View {
     @State private var dateFormat = ""
 
     @State private var acceptsEmailForwarding = false
+
+    /// onAppear fires again on every re-appearance; seeding twice would
+    /// discard whatever the user had typed and started editing.
+    @State private var didSeed = false
 
     var body: some View {
         NavigationStack {
@@ -72,10 +83,8 @@ struct AddSchoolView: View {
                     Text("Lets you pick this school as the destination when sharing an email into SchoolSync.")
                 }
             }
-            .navigationTitle("Add School")
-            .onAppear {
-                if selectedKidID == nil { selectedKidID = kids.first?.id }
-            }
+            .navigationTitle(existing == nil ? "Add School" : "Edit School")
+            .onAppear { seedIfNeeded() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -85,6 +94,44 @@ struct AddSchoolView: View {
                         .disabled(!isValid)
                 }
             }
+        }
+    }
+
+    /// Fills the form from the school being edited.
+    ///
+    /// A school's feed URL was previously write-once: the list showed only
+    /// that a feed existed, never what it pointed at, and there was no way to
+    /// change it. Correcting a wrong URL meant deleting the school and
+    /// re-adding it, which strands every event already attributed to the old
+    /// school ID. That's how a school configured with its site's news RSS
+    /// endpoint stayed broken without anyone being able to see it, let alone
+    /// fix it.
+    private func seedIfNeeded() {
+        guard !didSeed else { return }
+        didSeed = true
+
+        guard let existing else {
+            if selectedKidID == nil { selectedKidID = kids.first?.id }
+            return
+        }
+
+        name = existing.name
+        selectedKidID = existing.kidID
+        acceptsEmailForwarding = existing.acceptsEmailForwarding
+
+        icsFeedURLString = existing.icsFeedURLString ?? ""
+        usesICSFeed = !icsFeedURLString.isEmpty
+
+        scrapeURLString = existing.scrapeURLString ?? ""
+        usesScrape = !scrapeURLString.isEmpty
+
+        if let config = existing.scrapeConfig {
+            eventContainerSelector = config.eventContainerSelector
+            titleSelector = config.titleSelector ?? ""
+            dateSelector = config.dateSelector ?? ""
+            dateAttribute = config.dateAttribute ?? ""
+            locationSelector = config.locationSelector ?? ""
+            dateFormat = config.dateFormat ?? ""
         }
     }
 
@@ -107,15 +154,29 @@ struct AddSchoolView: View {
             dateFormat: dateFormat.isEmpty ? nil : dateFormat
         ) : nil
 
-        let school = SchoolRecord(
-            name: name.trimmingCharacters(in: .whitespaces),
-            kidID: kidID,
-            icsFeedURLString: usesICSFeed ? icsFeedURLString : nil,
-            scrapeURLString: usesScrape ? scrapeURLString : nil,
-            scrapeConfig: scrapeConfig,
-            acceptsEmailForwarding: acceptsEmailForwarding
-        )
-        modelContext.insert(school)
+        if let existing {
+            // Mutated rather than replaced: the school's id is what every
+            // event of this kid's is attributed by, so a new record would
+            // orphan all of them.
+            existing.name = name.trimmingCharacters(in: .whitespaces)
+            existing.kidID = kidID
+            existing.icsFeedURLString = usesICSFeed ? icsFeedURLString : nil
+            existing.scrapeURLString = usesScrape ? scrapeURLString : nil
+            existing.scrapeConfig = scrapeConfig
+            existing.acceptsEmailForwarding = acceptsEmailForwarding
+        } else {
+            modelContext.insert(
+                SchoolRecord(
+                    name: name.trimmingCharacters(in: .whitespaces),
+                    kidID: kidID,
+                    icsFeedURLString: usesICSFeed ? icsFeedURLString : nil,
+                    scrapeURLString: usesScrape ? scrapeURLString : nil,
+                    scrapeConfig: scrapeConfig,
+                    acceptsEmailForwarding: acceptsEmailForwarding
+                )
+            )
+        }
+
         try? modelContext.save()
         dismiss()
     }
