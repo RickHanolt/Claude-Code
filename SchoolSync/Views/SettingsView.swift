@@ -17,6 +17,13 @@ struct SettingsView: View {
     @AppStorage(AutoAcceptSetting.storageKey, store: AppGroup.sharedDefaults)
     private var autoAcceptRoutedMail = true
 
+    @Query private var allEvents: [SchoolEventRecord]
+    @Query private var allExceptions: [DayException]
+    @Query private var allRoutes: [SenderRoute]
+
+    @State private var showResetConfirm = false
+    @State private var isResetting = false
+
     @State private var isCleaningUp = false
     @State private var cleanupResult: String?
     @State private var showCleanupConfirm = false
@@ -179,6 +186,23 @@ struct SettingsView: View {
                     Text("Once you've assigned an email from an address to a kid, later mail from that address is saved without asking. The first email from any new sender is always reviewed by hand.")
                 }
 
+                Section {
+                    Button(role: .destructive) {
+                        showResetConfirm = true
+                    } label: {
+                        if isResetting {
+                            ProgressView()
+                        } else {
+                            Text("Start the calendar over")
+                        }
+                    }
+                    .disabled(isResetting)
+                } header: {
+                    Text("Start over")
+                } footer: {
+                    Text("Clears every event, every day change, and everything the app has learned about senders — including from your Calendar app. Kids, schools, normal days and your backend settings are kept. Nothing is re-extracted: feeds reload on the next sync, and forwarded emails can be reviewed again from the backend, which still holds them.")
+                }
+
                 Section("Appearance") {
                     Picker("Theme", selection: $appearanceRaw) {
                         ForEach(AppearanceSetting.allCases) { option in
@@ -198,6 +222,18 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .confirmationDialog(
+                "Start the calendar over?",
+                isPresented: $showResetConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete \(allEvents.count) event(s) and \(allExceptions.count) day change(s)", role: .destructive) {
+                    resetCalendar()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Kids, schools and normal days are kept. Events already written into your Calendar app are removed too. Anything that came from a feed returns on the next sync; anything that came by email has to be reviewed again.")
+            }
             .confirmationDialog(
                 "Remove \(staleEvents.count) old-parser event\(staleEvents.count == 1 ? "" : "s")?",
                 isPresented: $showCleanupConfirm,
@@ -222,6 +258,45 @@ struct SettingsView: View {
         IngestSettings.baseURL = trimmedURL.isEmpty ? nil : URL(string: trimmedURL)
         IngestSettings.apiKey = trimmedKey.isEmpty ? nil : trimmedKey
         ingestSaved = true
+    }
+
+    /// Wipes what was derived, keeps what was configured.
+    ///
+    /// The distinction is the whole point: kids, schools, normal days and
+    /// backend credentials were typed in by hand and are still correct. Events
+    /// and day changes were derived from documents, and a document filed under
+    /// the wrong child poisons everything downstream of it in a way that is
+    /// tedious to unpick row by row.
+    ///
+    /// Sender routes go too. They are also learned, and a route pointing at
+    /// the wrong kid would auto-file the very documents being re-reviewed
+    /// straight back into the mess this is clearing.
+    ///
+    /// Nothing is re-extracted. The backend still holds every candidate event
+    /// and exception it ever produced — acknowledging them marked them
+    /// consumed, it didn't delete them — so rebuilding costs a sync, not
+    /// another model call.
+    private func resetCalendar() {
+        isResetting = true
+        defer { isResetting = false }
+
+        let calendarSync = CalendarSyncService()
+
+        for event in allEvents {
+            // Remove the copy in the iOS calendar first. The sync only ever
+            // adds and updates, so an EKEvent whose record is gone would stay
+            // there permanently with nothing left pointing at it.
+            if let identifier = event.calendarSyncIdentifier {
+                try? calendarSync.delete(eventIdentifier: identifier)
+            }
+            modelContext.delete(event)
+        }
+
+        for exception in allExceptions { modelContext.delete(exception) }
+        for route in allRoutes { modelContext.delete(route) }
+
+        try? modelContext.save()
+        lastResult = nil
     }
 
     private func sync() async {
