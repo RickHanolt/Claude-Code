@@ -11,6 +11,9 @@ struct EditEventView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
+    @Query(sort: \KidRecord.name) private var kids: [KidRecord]
+    @Query(sort: \SchoolRecord.name) private var schools: [SchoolRecord]
+
     let event: SchoolEventRecord
     let kid: KidRecord?
 
@@ -22,6 +25,16 @@ struct EditEventView: View {
     @State private var notes: String
     @State private var errorMessage: String?
 
+    /// Which child this event belongs to.
+    ///
+    /// Editable because a whole document can land on the wrong one. A Pulaski
+    /// semester calendar assigned to the wrong kid put its closures under a
+    /// school that never closed on those days, and without this the only
+    /// remedy was deleting each event and paying to extract the document
+    /// again.
+    @State private var kidID: UUID
+    @State private var schoolID: UUID
+
     init(event: SchoolEventRecord, kid: KidRecord?) {
         self.event = event
         self.kid = kid
@@ -31,6 +44,12 @@ struct EditEventView: View {
         _endDate = State(initialValue: event.endDate ?? event.startDate.addingTimeInterval(3600))
         _location = State(initialValue: event.location ?? "")
         _notes = State(initialValue: event.notes ?? "")
+        _kidID = State(initialValue: event.kidID)
+        _schoolID = State(initialValue: event.schoolID)
+    }
+
+    private var eligibleSchools: [SchoolRecord] {
+        schools.filter { $0.kidID == kidID }
     }
 
     var body: some View {
@@ -61,6 +80,25 @@ struct EditEventView: View {
                     .frame(minHeight: 100)
             }
 
+            Section {
+                Picker("Kid", selection: $kidID) {
+                    ForEach(kids) { kid in Text(kid.name).tag(kid.id) }
+                }
+                if eligibleSchools.isEmpty {
+                    Text("That kid has no schools set up yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("School", selection: $schoolID) {
+                        ForEach(eligibleSchools) { school in Text(school.name).tag(school.id) }
+                    }
+                }
+            } header: {
+                Text("Assign to")
+            } footer: {
+                Text("Changing the kid moves this event to their calendar and removes it from the other one.")
+            }
+
             if let errorMessage {
                 Section {
                     Text(errorMessage).foregroundStyle(.red).font(.caption)
@@ -72,9 +110,22 @@ struct EditEventView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save", action: save)
-                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!canSave)
             }
         }
+        .onChange(of: kidID) { _, _ in
+            // A school belongs to one kid, so changing the kid invalidates the
+            // school. Pick the only one it could be, or clear it and make the
+            // user say.
+            if !eligibleSchools.contains(where: { $0.id == schoolID }) {
+                schoolID = eligibleSchools.first?.id ?? schoolID
+            }
+        }
+    }
+
+    private var canSave: Bool {
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return eligibleSchools.contains { $0.id == schoolID }
     }
 
     private func save() {
@@ -97,6 +148,21 @@ struct EditEventView: View {
         let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         event.notes = trimmedNotes.isEmpty ? nil : trimmedNotes
         event.isUserEdited = true
+
+        // Moving a kid means the copy already written into the old kid's
+        // iOS calendar has to go, or it lingers there forever: the sync only
+        // adds and updates, and would never revisit an event that is no longer
+        // in that kid's set. Clearing the identifier lets the next sync create
+        // it fresh in the new kid's calendar.
+        if kidID != event.kidID {
+            if let identifier = event.calendarSyncIdentifier {
+                try? CalendarSyncService().delete(eventIdentifier: identifier)
+            }
+            event.calendarSyncIdentifier = nil
+        }
+
+        event.kidID = kidID
+        event.schoolID = schoolID
 
         do {
             try modelContext.save()
