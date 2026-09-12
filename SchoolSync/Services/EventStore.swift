@@ -66,20 +66,26 @@ struct EventStore {
         return changed
     }
 
-    /// An event from a *different* source, on the same day, that looks like
-    /// the same event.
+    /// An event on the same day that looks like the same event.
     ///
-    /// Restricted to other sources on purpose. Within one feed, two similarly
-    /// worded events on one day are the school's own business — it knows
-    /// whether its 3pm and 4pm sessions are distinct, and collapsing them
-    /// would be this app overruling the authority it's reading from.
+    /// One exclusion, and it's narrower than it first appears: two events from
+    /// the same *feed* for the same school are left alone. A feed is a single
+    /// authoritative list, and collapsing two of its entries would be this app
+    /// overruling the source it's reading from — it knows whether its 3pm and
+    /// 4pm sessions are distinct.
+    ///
+    /// Email is not that. Two forwarded documents are two documents, and they
+    /// routinely describe the same closure in different words. Excluding them
+    /// as "the same source" produced a day showing "No school", "No School -
+    /// Professional Development", "No School - System Wide PD" and "School
+    /// Improvement Day — No School" for one child, all of which the title rule
+    /// would have matched had it been allowed to look.
     private func crossSourceMatch(for dto: SchoolEventDTO) throws -> SchoolEventRecord? {
         let calendar = Calendar.current
         let dayStart = calendar.startOfDay(for: dto.startDate)
         guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return nil }
 
         let kidID = dto.kidID
-        let sourceRaw = dto.source.rawValue
 
         // Narrowed in the query to one kid and one day: two children can
         // legitimately have the same event, and matching across them would
@@ -87,14 +93,15 @@ struct EventStore {
         let descriptor = FetchDescriptor<SchoolEventRecord>(
             predicate: #Predicate {
                 $0.kidID == kidID
-                    && $0.sourceRaw != sourceRaw
                     && $0.startDate >= dayStart
                     && $0.startDate < dayEnd
             }
         )
 
         return try modelContext.fetch(descriptor).first { record in
-            EventMatching.isSameEvent(
+            guard mayMatch(record, dto) else { return false }
+
+            return EventMatching.isSameEvent(
                 titleA: record.title,
                 startA: record.startDate,
                 isAllDayA: record.isAllDay,
@@ -104,6 +111,16 @@ struct EventStore {
                 calendar: calendar
             )
         }
+    }
+
+    /// Whether two events are even eligible to be compared.
+    ///
+    /// Only one pairing is off limits: the same non-email source publishing
+    /// twice for the same school. That's one list, and its author decides what
+    /// counts as two entries.
+    private func mayMatch(_ record: SchoolEventRecord, _ dto: SchoolEventDTO) -> Bool {
+        if record.source == .emailForward || dto.source == .emailForward { return true }
+        return record.source != dto.source || record.schoolID != dto.schoolID
     }
 
     /// Drains whatever the share extension queued in the App Group and
