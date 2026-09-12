@@ -223,5 +223,8 @@ struct SettingsView: View {
         defer { isSyncing = false }
         let coordinator = SyncCoordinator(modelContext: modelContext, calendarSyncService: CalendarSyncService())
         lastResult = await coordinator.runFullSync()
+        // Counts against the automatic interval too, so opening the app right
+        // after a manual sync doesn't immediately run a second one.
+        AutoSync.markRun()
     }
 }
