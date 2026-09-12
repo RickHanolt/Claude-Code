@@ -67,7 +67,32 @@ struct DayExceptionsView: View {
         }
         .navigationTitle("Day changes")
         .navigationBarTitleDisplayMode(.inline)
+        // Asked for rather than assumed. A batch is a whole semester of one
+        // kid's mornings, it took a model call to produce, and there is no
+        // undo behind it.
+        .confirmationDialog(
+            pendingDeletion.map { "Delete \($0.count) day change\($0.count == 1 ? "" : "s")?" } ?? "",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let batch = pendingDeletion {
+                Button("Delete", role: .destructive) {
+                    delete(batch)
+                    pendingDeletion = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+        } message: {
+            if let batch = pendingDeletion {
+                Text("From \(batch.provenance). This can't be undone — the document would have to be forwarded again.")
+            }
+        }
     }
+
+    @State private var pendingDeletion: Batch?
 
     @ViewBuilder
     private func row(for batch: Batch) -> some View {
@@ -93,16 +118,22 @@ struct DayExceptionsView: View {
                     Label("Move", systemImage: "arrow.left.arrow.right")
                         .font(.caption)
                 }
+                // Borderless, or SwiftUI gives the whole List row a single tap
+                // target and hands it to a button in the cell — so tapping
+                // anywhere on a batch deleted it. Ninety-one rows, one stray
+                // tap, no confirmation.
+                .buttonStyle(.borderless)
                 .disabled(kids.count < 2)
 
                 Spacer()
 
                 Button(role: .destructive) {
-                    delete(batch)
+                    pendingDeletion = batch
                 } label: {
                     Label("Delete \(batch.count)", systemImage: "trash")
                         .font(.caption)
                 }
+                .buttonStyle(.borderless)
             }
         }
         .padding(.vertical, 2)
