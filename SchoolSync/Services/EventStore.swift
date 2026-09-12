@@ -26,15 +26,84 @@ struct EventStore {
             if let existing = try modelContext.fetch(descriptor).first {
                 guard !existing.isDeletedByUser, !existing.isUserEdited else { continue }
                 existing.update(from: dto)
-            } else {
-                modelContext.insert(SchoolEventRecord(dto: dto))
+                changed += 1
+                continue
             }
+
+            // Nothing matched by id, but another source may already have
+            // described this event. A feed UID never equals a hash of an
+            // email's subject, so before this the same picture day arrived
+            // twice — once from the school's calendar, once from the
+            // newsletter announcing it.
+            if let twin = try crossSourceMatch(for: dto) {
+                // A tombstone outranks everything. Deleting one copy and
+                // having the other source put it back the next morning is
+                // worse than never having deduplicated at all.
+                guard !twin.isDeletedByUser, !twin.isUserEdited else { continue }
+
+                // Only a more trusted source may take over the row. An email
+                // arriving after the feed is dropped rather than merged: it
+                // has nothing to add and would only replace a published
+                // title with a sentence.
+                guard EventMatching.rank(dto.source) < EventMatching.rank(twin.source) else { continue }
+
+                // Adopt the incoming id as well as its fields. Without this
+                // the row keeps the old source's id, the new source fails to
+                // match it again on the very next sync, and the duplicate
+                // comes straight back.
+                twin.externalID = dto.id
+                twin.update(from: dto)
+                changed += 1
+                continue
+            }
+
+            modelContext.insert(SchoolEventRecord(dto: dto))
             changed += 1
         }
         if changed > 0 {
             try modelContext.save()
         }
         return changed
+    }
+
+    /// An event from a *different* source, on the same day, that looks like
+    /// the same event.
+    ///
+    /// Restricted to other sources on purpose. Within one feed, two similarly
+    /// worded events on one day are the school's own business — it knows
+    /// whether its 3pm and 4pm sessions are distinct, and collapsing them
+    /// would be this app overruling the authority it's reading from.
+    private func crossSourceMatch(for dto: SchoolEventDTO) throws -> SchoolEventRecord? {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: dto.startDate)
+        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return nil }
+
+        let kidID = dto.kidID
+        let sourceRaw = dto.source.rawValue
+
+        // Narrowed in the query to one kid and one day: two children can
+        // legitimately have the same event, and matching across them would
+        // delete one child's copy of a shared holiday.
+        let descriptor = FetchDescriptor<SchoolEventRecord>(
+            predicate: #Predicate {
+                $0.kidID == kidID
+                    && $0.sourceRaw != sourceRaw
+                    && $0.startDate >= dayStart
+                    && $0.startDate < dayEnd
+            }
+        )
+
+        return try modelContext.fetch(descriptor).first { record in
+            EventMatching.isSameEvent(
+                titleA: record.title,
+                startA: record.startDate,
+                isAllDayA: record.isAllDay,
+                titleB: dto.title,
+                startB: dto.startDate,
+                isAllDayB: dto.isAllDay,
+                calendar: calendar
+            )
+        }
     }
 
     /// Drains whatever the share extension queued in the App Group and
