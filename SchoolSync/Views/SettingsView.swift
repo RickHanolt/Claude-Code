@@ -78,6 +78,9 @@ struct SettingsView: View {
                     NavigationLink { EmailsListView() } label: {
                         Label("Emails", systemImage: "envelope")
                     }
+                    NavigationLink { SendersListView() } label: {
+                        Label("Senders", systemImage: "tray.and.arrow.down")
+                    }
                 }
 
                 Section("Calendar Access") {

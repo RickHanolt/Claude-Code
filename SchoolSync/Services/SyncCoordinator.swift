@@ -144,6 +144,10 @@ struct SyncCoordinator {
 
             guard
                 let sender = SenderRoute.normalize(email.sender),
+                // An address you forward things from yourself belongs to no
+                // single child. Routing would file a photographed permission
+                // slip to whichever kid you last picked, silently.
+                !AlwaysAskSenders.contains(sender),
                 let route = routes.first(where: { $0.sender == sender }),
                 kids.contains(where: { $0.id == route.kidID }),
                 schools.contains(where: { $0.id == route.schoolID && $0.kidID == route.kidID })

@@ -89,6 +89,10 @@ struct PendingReviewView: View {
     /// belongs to them is discarded here rather than offered.
     private func route(for email: PendingForwardedEmail) -> SenderRoute? {
         guard let sender = SenderRoute.normalize(email.sender),
+              // Exempt senders get no suggestion at all. Pre-filling a screen
+              // whose whole purpose is to make someone choose is how a wrong
+              // answer gets saved by reflex.
+              !AlwaysAskSenders.contains(sender),
               let match = senderRoutes.first(where: { $0.sender == sender }),
               kids.contains(where: { $0.id == match.kidID }),
               schools.contains(where: { $0.id == match.schoolID && $0.kidID == match.kidID })
