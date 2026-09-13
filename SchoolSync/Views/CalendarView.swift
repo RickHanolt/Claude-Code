@@ -73,11 +73,41 @@ struct CalendarView: View {
     private var kidsByID: [UUID: KidRecord] { Dictionary(uniqueKeysWithValues: kids.map { ($0.id, $0) }) }
     private var schoolsByID: [UUID: SchoolRecord] { Dictionary(uniqueKeysWithValues: schools.map { ($0.id, $0) }) }
 
-    private var upcomingByDay: [(day: Date, events: [SchoolEventRecord])] {
+    /// One day's events, with its month header already decided.
+    ///
+    /// The header used to be computed at render time by looking backwards
+    /// through the list by position. That crashed: deleting an event rebuilds
+    /// this array, and SwiftUI can re-evaluate a row still holding the index it
+    /// had before — which is now past the end. It survived the first delete and
+    /// died on the second or third, once enough days had collapsed.
+    ///
+    /// Deciding it here removes the lookup entirely. Nothing in the view
+    /// addresses this list by position any more.
+    private struct DaySection: Identifiable {
+        let day: Date
+        let events: [SchoolEventRecord]
+        /// Set only on the first day of a month, and on the very first day.
+        let monthHeader: String?
+
+        var id: Date { day }
+    }
+
+    private var upcomingByDay: [DaySection] {
         let calendar = Calendar.current
         let upcoming = events.filter { $0.startDate >= calendar.startOfDay(for: .now) }
         let grouped = Dictionary(grouping: upcoming) { calendar.startOfDay(for: $0.startDate) }
-        return grouped.keys.sorted().map { day in (day, grouped[day]!.sorted { $0.startDate < $1.startDate }) }
+        let days = grouped.keys.sorted()
+
+        return days.enumerated().map { index, day in
+            let isNewMonth = index == 0
+                || !calendar.isDate(day, equalTo: days[index - 1], toGranularity: .month)
+
+            return DaySection(
+                day: day,
+                events: (grouped[day] ?? []).sorted { $0.startDate < $1.startDate },
+                monthHeader: isNewMonth ? day.formatted(.dateTime.month(.wide).year()) : nil
+            )
+        }
     }
 
     var body: some View {
@@ -97,9 +127,9 @@ struct CalendarView: View {
                     )
                 } else {
                     List {
-                        ForEach(Array(upcomingByDay.enumerated()), id: \.element.day) { dayIndex, section in
+                        ForEach(upcomingByDay) { section in
                             Section {
-                                if let month = monthHeader(at: dayIndex) {
+                                if let month = section.monthHeader {
                                     Text(month)
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
@@ -173,15 +203,6 @@ struct CalendarView: View {
     /// the restyle dropped the month that the old "Friday, September 4" label
     /// carried. A header only at the boundary keeps the month visible without
     /// repeating it on every row.
-    private func monthHeader(at dayIndex: Int) -> String? {
-        let day = upcomingByDay[dayIndex].day
-        guard dayIndex > 0 else { return day.formatted(.dateTime.month(.wide).year()) }
-
-        let previous = upcomingByDay[dayIndex - 1].day
-        let sameMonth = Calendar.current.isDate(day, equalTo: previous, toGranularity: .month)
-        return sameMonth ? nil : day.formatted(.dateTime.month(.wide).year())
-    }
-
     private func dayRow(day: Date, event: SchoolEventRecord, isFirstOfDay: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
             // The gutter keeps its width on EVERY row, not only the first.
