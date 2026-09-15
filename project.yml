@@ -81,6 +81,33 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.rickhanolt.schoolsync
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    # Puts the tests in the shared scheme's Test action, which is what lets CI
+    # run `xcodebuild test -scheme SchoolSync`. Without it the target builds and
+    # is never executed — the exact shape of "looks covered, isn't".
+    scheme:
+      testTargets:
+        - SchoolSyncTests
+
+  SchoolSyncTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: SchoolSyncTests
+    # Depending on the app rather than re-listing Shared: these tests reach the
+    # rules through `@testable import SchoolSync`, so they exercise the same
+    # compiled code the app ships instead of a second copy that could drift.
+    dependencies:
+      - target: SchoolSync
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rickhanolt.schoolsync.tests
+        TARGETED_DEVICE_FAMILY: "1"
+        # The app target signs manually for Codemagic's profile injection. A
+        # test bundle has no profile and never leaves a simulator, so it opts
+        # back out rather than failing to resolve one that doesn't exist.
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
 
   SchoolSyncShare:
     type: app-extension

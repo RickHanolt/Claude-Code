@@ -36,3 +36,37 @@ jobs:
             -destination "generic/platform=iOS Simulator" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
+
+      # Compiling proves the code isn't gibberish. It says nothing about whether
+      # it's right — "show the event only on its start date" compiled cleanly for
+      # months while hiding every multi-day school closure after its first day.
+      #
+      # The simulator is chosen by UDID at runtime rather than by name. Runner
+      # images rename and renumber their devices without warning, and a
+      # hardcoded "iPhone 15" turns into a red build that has nothing to do with
+      # the commit that hit it.
+      - name: Pick a simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          runtimes = json.load(sys.stdin)["devices"]
+          for runtime in sorted(runtimes, reverse=True):
+              if "iOS" not in runtime:
+                  continue
+              for device in runtimes[runtime]:
+                  if device["name"].startswith("iPhone"):
+                      print(device["udid"])
+                      sys.exit(0)
+          sys.exit("no iPhone simulator available on this runner")')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices available | grep "$UDID"
+
+      - name: Run unit tests
+        run: |
+          xcodebuild test \
+            -project SchoolSync.xcodeproj \
+            -scheme SchoolSync \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO

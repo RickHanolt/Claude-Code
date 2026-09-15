@@ -212,27 +212,13 @@ struct MorningModeView: View {
 
         return events
             .filter { event in
-                guard event.kidID == kid.id else { return false }
-                let first = calendar.startOfDay(for: event.startDate)
-
-                // A break spans days, and it is every bit as true on the
-                // Wednesday as on the Monday. Matching the start date alone
-                // announced "Spring Vacation — Schools Closed" once and then
-                // printed an ordinary school morning — breakfast, packed lunch,
-                // uniform, "Nothing unusual" — for every remaining day of it.
-                //
-                // Worse than looking wrong: those fields are suppressed by
-                // finding a closure among the day's lines, so dropping the
-                // event on day two also switched the suppression back on.
-                guard let endDate = event.endDate else { return first == target }
-
-                let last = calendar.startOfDay(for: endDate)
-                // An end before its start is bad data, not an empty range.
-                // Falling back to the start day keeps such a row visible rather
-                // than silently dropping it from every day at once.
-                guard last >= first else { return first == target }
-
-                return target >= first && target <= last
+                event.kidID == kid.id
+                    && EventDayMatching.occurs(
+                        on: target,
+                        start: event.startDate,
+                        end: event.endDate,
+                        calendar: calendar
+                    )
             }
             .sorted { $0.startDate < $1.startDate }
     }
