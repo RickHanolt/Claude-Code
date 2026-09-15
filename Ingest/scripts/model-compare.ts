@@ -68,20 +68,67 @@ function arg(name: string, fallback: string): string {
   return hit ? hit.slice(name.length + 3) : fallback;
 }
 
-/** Same day, same words — enough to tell "both found this" from "only one did".
- * Deliberately looser than the production dedupe: here a near-miss in wording
- * should count as a match, because the question is whether the model SAW the
- * event, not whether it phrased it identically. */
-function key(e: { title: string; startDate: string }): string {
-  const day = e.startDate.slice(0, 10);
-  const words = e.title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(" ")
-    .filter((w) => w.length > 2)
-    .sort()
-    .join(" ");
-  return `${day} ${words}`;
+interface Seen {
+  day: string;
+  words: Set<string>;
+  title: string;
+}
+
+function describe(e: { title: string; startDate: string }): Seen {
+  return {
+    day: e.startDate.slice(0, 10),
+    words: new Set(
+      e.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .split(" ")
+        .filter((w) => w.length > 2)
+    ),
+    title: e.title,
+  };
+}
+
+/** How much of the shorter title the two share.
+ *
+ * The first version of this compared word SETS for equality, which is far too
+ * strict for the question being asked. "Fall LEGO Club" against "LEGO Club" is
+ * one word apart and scored as a total miss; so did "Back to School Mass & BBQ"
+ * against "...Mass and BBQ", because "and" survives the length filter. It
+ * reported Sonnet at 30% recall on emails where both models had found the same
+ * sixteen events.
+ *
+ * Containment against the shorter title is what the production dedupe uses, and
+ * for the same reason: one side being wordier is the common case. */
+function overlap(a: Seen, b: Seen): number {
+  if (a.words.size === 0 || b.words.size === 0) {
+    return a.title.toLowerCase() === b.title.toLowerCase() ? 1 : 0;
+  }
+
+  // Numbers disagreeing means different things, whatever the rest shares.
+  // "Basketball Skills Program K-3rd" and "...4th-8th" overlap at 0.75 on
+  // words alone and are two different sessions on the same afternoon — the
+  // same guard the iOS matcher applies, and this check is why it's here.
+  //
+  // Only enforced when BOTH sides carry numbers: "SMA Golf Outing 2026"
+  // against a plainer "Golf Outing" is one model being wordier, not a
+  // disagreement.
+  const digitsA = [...a.words].filter((w) => /\d/.test(w)).sort().join(" ");
+  const digitsB = [...b.words].filter((w) => /\d/.test(w)).sort().join(" ");
+  if (digitsA && digitsB && digitsA !== digitsB) return 0;
+
+  let shared = 0;
+  for (const w of a.words) if (b.words.has(w)) shared += 1;
+  return shared / Math.min(a.words.size, b.words.size);
+}
+
+/** Lower than the production threshold (0.75) on purpose. Production is
+ * deciding whether to HIDE a row, where a wrong merge loses information. Here
+ * it decides whether two models saw the same thing, where being slightly
+ * generous costs nothing and being strict invents a quality gap. */
+const MATCH_THRESHOLD = 0.6;
+
+function findMatch(needle: Seen, haystack: Seen[]): Seen | undefined {
+  return haystack.find((c) => c.day === needle.day && overlap(needle, c) >= MATCH_THRESHOLD);
 }
 
 async function main() {
@@ -105,7 +152,7 @@ async function main() {
   console.log(`Cost ceiling: $${maxCost.toFixed(2)}. Anything beyond it stops the run.\n`);
 
   const spend: Record<string, number> = {};
-  const found: Record<string, Record<string, Set<string>>> = {};
+  const found: Record<string, Record<string, Seen[]>> = {};
   let total = 0;
 
   for (const email of emails) {
@@ -155,7 +202,7 @@ async function main() {
         total += cost;
         spend[armConfig.model] = (spend[armConfig.model] ?? 0) + cost;
         found[armConfig.model] ??= {};
-        found[armConfig.model][email.id] = new Set(result.events.map(key));
+        found[armConfig.model][email.id] = result.events.map(describe);
 
         console.log(
           `  ${armConfig.model.padEnd(20)} ${String(result.events.length).padStart(3)} events  ` +
@@ -166,7 +213,7 @@ async function main() {
         // that rejects a parameter is itself a result worth printing.
         console.log(`  ${armConfig.model.padEnd(20)} FAILED: ${(error as Error).message.slice(0, 90)}`);
         found[armConfig.model] ??= {};
-        found[armConfig.model][email.id] = new Set();
+        found[armConfig.model][email.id] = [];
       }
     }
   }
@@ -176,7 +223,7 @@ async function main() {
 
 function report(
   spend: Record<string, number>,
-  found: Record<string, Record<string, Set<string>>>,
+  found: Record<string, Record<string, Seen[]>>,
   emails: EmailRow[]
 ) {
   const baseline = ARMS[0].model;
@@ -190,23 +237,30 @@ function report(
     const examples: string[] = [];
 
     for (const email of emails) {
-      const base = found[baseline]?.[email.id] ?? new Set();
-      const mine = found[arm.model]?.[email.id] ?? new Set();
+      const base = found[baseline]?.[email.id] ?? [];
+      const mine = found[arm.model]?.[email.id] ?? [];
 
-      for (const k of base) {
-        if (mine.has(k)) agreed += 1;
-        else {
+      // Each candidate is claimed at most once, so a model that emits the same
+      // event three times can't score three matches against one baseline row.
+      const unclaimed = [...mine];
+      for (const b of base) {
+        const hit = findMatch(b, unclaimed);
+        if (hit) {
+          agreed += 1;
+          unclaimed.splice(unclaimed.indexOf(hit), 1);
+        } else {
           missed += 1;
-          if (examples.length < 8) examples.push(`missed: ${k}`);
+          if (examples.length < 10) examples.push(`${b.day}  ${b.title.slice(0, 54)}`);
         }
       }
-      for (const k of mine) if (!base.has(k)) extra += 1;
+      extra += unclaimed.length;
     }
 
     const recall = agreed + missed > 0 ? (agreed / (agreed + missed)) * 100 : 0;
     console.log(`${arm.model}`);
     console.log(`  found ${agreed} of the baseline's ${agreed + missed} events (${recall.toFixed(0)}%)`);
     console.log(`  ${extra} event(s) the baseline did not find`);
+    if (examples.length > 0) console.log("  not found by this model:");
     for (const line of examples) console.log(`    ${line}`);
     console.log();
   }
