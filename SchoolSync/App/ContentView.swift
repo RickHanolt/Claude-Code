@@ -57,11 +57,28 @@ struct ContentView: View {
         isAutoSyncing = true
         defer { isAutoSyncing = false }
 
-        let coordinator = SyncCoordinator(
-            modelContext: modelContext,
-            calendarSyncService: CalendarSyncService()
-        )
-        _ = await coordinator.runFullSync()
+        let snapshots = SnapshotService(modelContext: modelContext)
+
+        switch ViewerSettings.role {
+        case .viewer:
+            // A viewer's entire sync. No feeds, no backend queue, no calendar
+            // writes — its only source of truth is what the owner published,
+            // and fetching a school's feed itself would immediately drift from
+            // the snapshot it is meant to be mirroring.
+            try? await snapshots.refreshFromSnapshot(calendarSync: CalendarSyncService())
+
+        case .owner, .unconfigured:
+            let coordinator = SyncCoordinator(
+                modelContext: modelContext,
+                calendarSyncService: CalendarSyncService()
+            )
+            _ = await coordinator.runFullSync()
+
+            // After, not before: a snapshot published from a half-synced store
+            // would show viewers yesterday's calendar with today's timestamp.
+            await snapshots.publishIfNeeded(hasViewers: ViewerSettings.hasViewers)
+        }
+
         AutoSync.markRun()
     }
 }
