@@ -95,7 +95,7 @@ const ExtractedException = z.object({
     .boolean()
     .nullable()
     .describe(
-      "Only for field 'lunch'. True when a meal is provided or ordered and nobody at home has to make one. False when no meal is provided and a lunch must be packed. Null for every other field, and for a lunch day the document flags or annotates without saying which of the two it is."
+      "Only for field 'lunch'. True when nobody at home has to make a lunch — either the school provides one, or the children are dismissed before lunch. False when no meal is provided and a lunch must be packed. Null for every other field, and for a lunch day the document flags or annotates without saying which of the two it is."
     ),
   note: z
     .string()
@@ -140,6 +140,9 @@ Rules:
 - Title the event as a parent would say it. Do not use the email subject as a title, and do not copy a fragment of surrounding text.
 - Every clock time in a school email is local time in ${timeZone} (currently UTC${offset}). Attach that offset to every time you emit, e.g. a 3:00 p.m. practice is 2026-08-24T15:00:00${offset}. Never emit a time with no offset.
 - Set isAllDay true when the email gives no clock time. A multi-day window ("iReady testing Aug 31 - Sept 4") is all-day with a start and an end, not a timed event.
+- A clock time sitting next to "dismissal", "release", "pickup", "early out" or "half day" is when children LEAVE, not when the event begins. "Grandparent Day 11:00am Dismissal" is an all-day event called Grandparent Day plus an 11:00am dismissal — it is NOT an event starting at 11:00am. Reading it the second way tells a parent to arrive exactly when they were supposed to collect a child. A time range for the event itself ("Parent/Teacher Conference 3-8pm") is a genuine timed event; the difference is the word next to the time.
+- An early dismissal is a reminder exception for that date, phrased with the time — "Early dismissal 11:00am". Emit it in addition to the day's event, never instead of it.
+- "No aftercare", "no extended day", "no bus", "no aftercare programme" is its own reminder exception for that date. It changes who collects a child and when, so it must never be dropped or left buried inside an event title.
 - Put location and useful detail in notes. Null if there is nothing worth keeping.
 - If the email contains no real dated events, return an empty list. That is a valid and common answer.
 
@@ -148,6 +151,7 @@ Some documents are not lists of events at all. A lunch-ordering calendar, a menu
 - For a lunch exception set lunchProvided: true when a meal is provided or ordered, false when one must be packed. Leave it null for every other field.
 - A day the calendar FLAGS or annotates without saying what the flag means is a day you do not know about. Set lunchProvided null and phrase the value as what is actually known — "Lunch flagged on the calendar" — never as an instruction. A flag can mean a special event lunch is served, or that ordering closed, or that the day is short; guessing "Pack a lunch" asserts something the document never said, on the one day it went out of its way to mark.
 - Phrase a lunch value as what the morning actually requires: "Pack a lunch" when lunchProvided is false, "Lunch provided" — or the dish, if the document names it — when true.
+- A day dismissing before lunch needs no lunch from anyone. Set lunchProvided true and say why: "No lunch needed — 11:00am dismissal". The field asks whether someone at home has to make one, and the answer on a morning like that is no.
 - For a lunch line, set isNotable to agree with lunchProvided — true when a lunch must be packed, false when a meal is provided, and true for a flagged day you could not resolve, since an unexplained flag is exactly what a parent should look at. The app normally reads lunchProvided and ignores isNotable here, but falls back to it when lunchProvided is null, so the two must never contradict each other. For every other field set isNotable true when a parent must act or change something, false when you are only filling in a detail that varies every day anyway.
 - A closed day is not a pack-a-lunch day. If a date is a holiday, a break, or otherwise marked as no school, emit the closure as an event and no lunch exception for it. The same goes for weekends and any day outside the school week.
 - A document can produce both: a menu with "no school" on one date gives an exception for the routine and an event for the closure.
