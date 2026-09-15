@@ -209,13 +209,13 @@ private struct KidPanel: View {
                 BlockWord(word: kid.name, colorSeed: kid.name.count, sizes: [24, 21, 18, 15])
 
                 // Breakfast, lunch and uniform are all answers to "what does
-                // the school day need". On a day with no school they are
+                // the school day need". On a weekend or a closure they are
                 // answers to a question nobody is asking, and printing them
-                // costs the closure the prominence it should have.
+                // costs whatever does matter the prominence it should have.
                 //
                 // Events survive: a cross country meet at 3:30 still happens on
-                // a day off, and still needs someone to drive.
-                if !isClosed {
+                // a day off, and a Saturday game needs a driver like any other.
+                if isSchoolDay {
                     VStack(alignment: .leading, spacing: 7) {
                         FieldRow(field: plan.breakfast, accent: accent)
                         FieldRow(field: plan.lunch, accent: accent)
@@ -229,11 +229,15 @@ private struct KidPanel: View {
                     // to load", and at 7am you shouldn't have to work out which.
                     // Silence only functions as a signal when it's distinguishable
                     // from a bug.
+                    //
+                    // "Nothing unusual" is a statement about a school day, and
+                    // on a Saturday it reads as though one were expected. The
+                    // weekend needs its own words.
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
-                        Text("Nothing unusual")
+                        Text(isSchoolDay ? "Nothing unusual" : "Nothing planned")
                             .font(.subheadline)
                             .foregroundStyle(.tertiary)
                     }
@@ -284,10 +288,18 @@ private struct KidPanel: View {
         return ClosureCollapse.collapse(reminders + eventItems)
     }
 
-    /// Only ever true for this one kid on this one day. The other panel is
-    /// resolved separately, because one school being shut says nothing about
-    /// the other.
-    private var isClosed: Bool { ClosureCollapse.containsClosure(lines) }
+    /// Whether the school day's answers are worth printing.
+    ///
+    /// A weekend and a closure are the same thing to this screen: there is no
+    /// school day, so "School Lunch" and "Uniform" answer a question nobody is
+    /// asking. Treating them as one concept also means the next kind of
+    /// non-school day — a holiday, a summer — has somewhere obvious to go.
+    ///
+    /// Per kid and per day. One school being shut says nothing about the other,
+    /// and both panels resolve separately.
+    private var isSchoolDay: Bool {
+        !Calendar.current.isDateInWeekend(plan.day) && !ClosureCollapse.containsClosure(lines)
+    }
 
     private func eventLabel(_ event: SchoolEventRecord) -> String {
         guard !event.isAllDay else { return event.title }
