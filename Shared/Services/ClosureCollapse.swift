@@ -68,6 +68,43 @@ enum ClosureCollapse {
         "pictures", "store", "spirit", "fee", "fees", "pickup", "dropoff",
     ]
 
+    /// Words naming a stretch of days when school is out.
+    private static let periodNouns: Set<String> = [
+        "break", "vacation", "recess", "holiday", "holidays",
+    ]
+
+    /// What has to sit immediately before one of those nouns for it to mean
+    /// school is shut.
+    ///
+    /// Requiring the pair is the whole safety margin. A substring search for
+    /// "break" matches "Breakfast", a word this app prints on every panel of
+    /// every ordinary morning — it would switch the school day off every day of
+    /// the year. Matching "break" as a bare word is better and still catches
+    /// "Brain Break". Only a qualifier in front of it makes the phrase name a
+    /// period rather than mention one.
+    private static let periodQualifiers: Set<String> = [
+        "spring", "easter", "winter", "summer", "fall", "autumn", "thanksgiving",
+        "christmas", "holiday", "mid", "midwinter", "midterm", "february",
+        "march", "april", "november", "december", "presidents", "president",
+        "memorial", "labor", "columbus", "school", "schools",
+    ]
+
+    /// Words that turn a named period into an announcement about one.
+    ///
+    /// "Spring Break Camp Registration" is a deadline on a school day, not a
+    /// school day off, and collapsing it would suppress the morning's real
+    /// answers on a day the school is open. Kept separate from the follower
+    /// list above because that one guards "no school —" and the two have no
+    /// reason to move together.
+    private static let periodDisqualifiers: Set<String> = [
+        "camp", "camps", "care", "childcare", "registration", "registrations",
+        "signup", "signups", "sign", "form", "forms", "deadline", "deadlines",
+        "packet", "packets", "club", "clubs", "program", "programs", "schedule",
+        "hours", "assignment", "assignments", "homework", "project", "projects",
+        "reading", "info", "information", "meeting", "party", "concert", "mass",
+        "fundraiser", "drive", "collection", "sale",
+    ]
+
     static func isClosure(_ text: String) -> Bool {
         matchedPhrase(in: text) != nil
     }
@@ -87,6 +124,27 @@ enum ClosureCollapse {
 
             if let following, disqualifyingFollowers.contains(following) { continue }
             return phrase
+        }
+
+        return matchedPeriod(in: normalized)
+    }
+
+    /// A named stretch of days off — "Easter Break", "Spring Vacation".
+    ///
+    /// Whole words, and only a qualifier immediately followed by a period noun.
+    /// Every looser rule fails somewhere that matters; see `periodQualifiers`.
+    private static func matchedPeriod(in normalized: String) -> String? {
+        let words = normalized.split(separator: " ").map(String.init)
+
+        for index in words.indices where index > 0 {
+            guard periodNouns.contains(words[index]),
+                  periodQualifiers.contains(words[index - 1])
+            else { continue }
+
+            let following = index + 1 < words.count ? words[index + 1] : nil
+            if let following, periodDisqualifiers.contains(following) { continue }
+
+            return "\(words[index - 1]) \(words[index])"
         }
         return nil
     }
