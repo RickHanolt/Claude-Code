@@ -1,0 +1,13 @@
+-- Image URLs referenced by an email's HTML but not carried inside it.
+--
+-- A school newsletter built on a mailing platform puts its calendar on the
+-- platform's CDN and references it with <img src>. The bytes never travel in
+-- the message, so `parsed.attachments` is empty and extraction has only the
+-- prose to work with. A September calendar picture cost us "Pizza/Jean Day"
+-- and nobody would ever have noticed.
+--
+-- Stored as a JSON array at receive time rather than fetched there: the mail
+-- handler decides whether Cloudflare accepts the message, and putting four
+-- network round-trips in that path is the same mistake as putting the model
+-- call in it.
+ALTER TABLE forwarded_emails ADD COLUMN remote_image_urls TEXT;

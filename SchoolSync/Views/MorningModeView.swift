@@ -24,6 +24,11 @@ struct MorningModeView: View {
 
     private var publishedAt: Date? { ViewerSettings.date(fromStoredInterval: publishedAtRaw) }
 
+    @AppStorage(AttentionNotices.storageKey, store: AppGroup.sharedDefaults)
+    private var attentionData = Data()
+
+    private var attentionCount: Int { AttentionNotices.decode(attentionData).count }
+
     /// Days either side of today that can be swiped to.
     ///
     /// Bounded because a paging TabView needs a finite set of pages, and these
@@ -123,6 +128,23 @@ struct MorningModeView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 5)
                         .background(.bar)
+                } else if attentionCount > 0 {
+                    // Same reasoning as the viewer's staleness line, and the
+                    // same restraint. A newsletter whose calendar couldn't be
+                    // read means today's panel may be missing something — which
+                    // makes it about today after all — but it is not urgent
+                    // enough to earn weight on the one screen built to stay
+                    // quiet. One line, at the bottom, no colour beyond the
+                    // symbol.
+                    Label(
+                        "\(attentionCount) email\(attentionCount == 1 ? "" : "s") need a look — see Settings",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(Color.orange)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 5)
+                    .background(.bar)
                 }
             }
         }

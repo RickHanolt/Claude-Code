@@ -3,6 +3,7 @@ import { extractEvents } from "./extractor";
 import { randomToken, sha256Hex } from "./auth";
 import { collapseDuplicates, contentFingerprint, isDuplicateEvent, type ExistingEvent } from "./dedupe";
 import { selectAttachment, type StoredAttachment } from "./attachments";
+import { extractImageURLs, fetchRemoteImages } from "./remoteImages";
 import { DEFAULT_TIMEZONE } from "./timezone";
 import {
   authenticateViewer,
@@ -127,7 +128,8 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
   const timeZone = household?.timezone || DEFAULT_TIMEZONE;
 
   const pending = await env.DB.prepare(
-    `SELECT id, subject, body_text as bodyText, received_at as receivedAt
+    `SELECT id, subject, body_text as bodyText, received_at as receivedAt,
+            remote_image_urls as remoteImageURLs, attachment_note as attachmentNote
      FROM forwarded_emails
      WHERE household_id = ?
        AND extraction_attempts < ?
@@ -137,7 +139,14 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
      LIMIT 3`
   )
     .bind(householdID, MAX_EXTRACTION_ATTEMPTS, staleClaimCutoff)
-    .all<{ id: string; subject: string; bodyText: string; receivedAt: string }>();
+    .all<{
+      id: string;
+      subject: string;
+      bodyText: string;
+      receivedAt: string;
+      remoteImageURLs: string | null;
+      attachmentNote: string | null;
+    }>();
 
   for (const email of pending.results ?? []) {
     // Claim the row before doing any work. Extraction now runs in the
@@ -171,12 +180,38 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
         .bind(email.id)
         .all<StoredAttachment>();
 
+      // Fetched here rather than at receive time, for the same reason the
+      // model call is: the mail handler decides whether Cloudflare accepts the
+      // message, and network round-trips do not belong in it.
+      let referenced: string[] = [];
+      try {
+        referenced = email.remoteImageURLs ? (JSON.parse(email.remoteImageURLs) as string[]) : [];
+      } catch {
+        referenced = [];
+      }
+
+      const remote = await fetchRemoteImages(referenced);
+
+      // Appended after the real attachments, so a genuine PDF still leads.
+      const inputs = [...(attachments.results ?? []), ...remote.images];
+
+      // Recorded whether or not anything failed. A picture that couldn't be
+      // read is the one thing a person needs to know when an email produces
+      // less than they expected, and "Pizza/Jean Day" went missing for weeks
+      // precisely because nothing said so anywhere.
+      const note = [email.attachmentNote, remote.note].filter(Boolean).join("\n") || null;
+      if (note !== email.attachmentNote) {
+        await env.DB.prepare("UPDATE forwarded_emails SET attachment_note = ? WHERE id = ?")
+          .bind(note, email.id)
+          .run();
+      }
+
       const { events, exceptions } = await extractEvents(
         env.ANTHROPIC_API_KEY,
         email.subject,
         email.bodyText,
         new Date(email.receivedAt),
-        attachments.results ?? [],
+        inputs,
         timeZone
       );
 
@@ -586,6 +621,11 @@ export default {
     // Recorded on the email rather than only logged. The one thing a person
     // needs when a forwarded screenshot yields nothing is to know whether the
     // model saw it, and Worker logs are not somewhere a parent can look.
+    // Referenced but not carried. Recorded here and fetched at extraction
+    // time: this handler decides whether Cloudflare accepts the message, and
+    // four network round-trips belong in it no more than the model call does.
+    const remoteImageURLs = extractImageURLs(parsed.html ?? "");
+
     const attachmentNote = skips.length > 0 ? skips.join("\n") : null;
 
     const contentHash = await sha256Hex(contentFingerprint(subject, bodyText, attachments));
@@ -613,8 +653,9 @@ export default {
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO forwarded_emails
-           (id, household_id, sender, subject, body_text, received_at, content_hash, attachment_note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, household_id, sender, subject, body_text, received_at, content_hash,
+            attachment_note, remote_image_urls)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         emailID,
         household.id,
@@ -623,7 +664,8 @@ export default {
         bodyText,
         receivedAt,
         contentHash,
-        attachmentNote
+        attachmentNote,
+        remoteImageURLs.length > 0 ? JSON.stringify(remoteImageURLs) : null
       ),
       ...attachments.map((attachment) =>
         env.DB.prepare(

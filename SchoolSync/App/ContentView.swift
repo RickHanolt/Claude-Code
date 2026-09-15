@@ -24,6 +24,13 @@ struct ContentView: View {
 
     @Query private var kids: [KidRecord]
 
+    @AppStorage(AttentionNotices.storageKey, store: AppGroup.sharedDefaults)
+    private var attentionData = Data()
+
+    /// Badged rather than announced. The count belongs where the fix is, and a
+    /// modal on launch would interrupt the one screen this app exists for.
+    private var attentionCount: Int { AttentionNotices.decode(attentionData).count }
+
     @State private var isAutoSyncing = false
 
     /// Only a genuinely blank install gets asked. An app with kids in it has
@@ -74,6 +81,7 @@ struct ContentView: View {
             } else {
                 SettingsView()
                     .tabItem { Label("Settings", systemImage: "gearshape") }
+                    .badge(attentionCount)
             }
         }
     }

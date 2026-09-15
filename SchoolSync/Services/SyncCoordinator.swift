@@ -40,6 +40,22 @@ struct SyncCoordinator {
         // PendingReviewView handle the actual review/save.
         if let client = IngestClient.configured() {
             if let pending = try? await client.fetchPending() {
+                // Recorded before auto-accept, not after. An email from a known
+                // sender is filed immediately and leaves the pending queue with
+                // its explanation attached — and that is exactly the email most
+                // likely to have lost a calendar picture on the way in.
+                for email in pending.emails {
+                    guard let note = email.attachmentNote, !note.isEmpty else { continue }
+                    AttentionNotices.record(
+                        AttentionNotice(
+                            id: email.id,
+                            subject: email.subject,
+                            note: note,
+                            receivedAt: email.receivedAt
+                        )
+                    )
+                }
+
                 result.pendingReviewCount = await autoAcceptRoutedMail(pending, client: client, into: &result)
             }
         }

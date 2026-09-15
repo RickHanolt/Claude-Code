@@ -17,6 +17,11 @@ struct SettingsView: View {
     @AppStorage(AutoAcceptSetting.storageKey, store: AppGroup.sharedDefaults)
     private var autoAcceptRoutedMail = true
 
+    @AppStorage(AttentionNotices.storageKey, store: AppGroup.sharedDefaults)
+    private var attentionData = Data()
+
+    private var notices: [AttentionNotice] { AttentionNotices.decode(attentionData) }
+
     @Query private var allKids: [KidRecord]
     @Query private var allEvents: [SchoolEventRecord]
     @Query private var allExceptions: [DayException]
@@ -72,6 +77,25 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // First section, above everything, and only when there is
+                // something. A warning that has to be scrolled to is a warning
+                // that gets found the same way the problem did: by accident.
+                if !notices.isEmpty {
+                    Section {
+                        NavigationLink {
+                            AttentionNoticesView()
+                        } label: {
+                            Label(
+                                "\(notices.count) email\(notices.count == 1 ? "" : "s") need a look",
+                                systemImage: "exclamationmark.triangle"
+                            )
+                            .foregroundStyle(Color.orange)
+                        }
+                    } footer: {
+                        Text("Something arrived that the app couldn't read — usually a calendar picture a newsletter links to rather than attaches.")
+                    }
+                }
+
                 // Kids, Schools and Emails were tabs of equal standing with
                 // the calendar. They're setup and history — touched when
                 // something changes, not on a school morning — so they live
