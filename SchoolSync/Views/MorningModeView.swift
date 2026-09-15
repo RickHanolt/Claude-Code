@@ -230,14 +230,13 @@ private struct KidPanel: View {
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 5) {
-                        ForEach(plan.reminders, id: \.value) { reminder in
-                            ReminderRow(text: reminder.value, isException: reminder.isException, accent: accent)
-                        }
-
-                        // Events always read as notable — an event on the calendar
-                        // is by definition not part of an ordinary day.
-                        ForEach(events) { event in
-                            ReminderRow(text: eventLabel(event), isException: true, accent: accent)
+                        ForEach(lines) { line in
+                            ReminderRow(
+                                text: line.text,
+                                detail: line.detail,
+                                isException: line.isNotable,
+                                accent: accent
+                            )
                         }
                     }
                 }
@@ -254,6 +253,26 @@ private struct KidPanel: View {
             // as this kid's area, which is what it is.
             accent.opacity(0.06)
         )
+    }
+
+    /// Day changes and calendar events, merged into one list.
+    ///
+    /// They were two `ForEach`es rendering identically, which meant a closure
+    /// known to both stores read twice — and on Sep 25 it read three times
+    /// across two kids, each source phrasing it its own way.
+    private var lines: [MorningItem] {
+        let reminders = plan.reminders.map {
+            MorningItem(text: $0.value, isNotable: $0.isException)
+        }
+
+        // Events always read as notable — an event on the calendar is by
+        // definition not part of an ordinary day. Matched on the bare title, so
+        // a timed event's "3:30 PM · " prefix can't confuse the detection.
+        let eventItems = events.map {
+            MorningItem(text: eventLabel($0), isNotable: true, matchText: $0.title)
+        }
+
+        return ClosureCollapse.collapse(reminders + eventItems)
     }
 
     private func eventLabel(_ event: SchoolEventRecord) -> String {
@@ -301,6 +320,7 @@ private struct FieldRow: View {
 
 private struct ReminderRow: View {
     let text: String
+    var detail: String?
     let isException: Bool
     let accent: Color
 
@@ -310,11 +330,24 @@ private struct ReminderRow: View {
                 .font(.caption)
                 .foregroundStyle(isException ? accent : Color.secondary)
 
-            Text(text)
-                .font(.subheadline)
-                .fontWeight(isException ? .medium : .regular)
-                .foregroundStyle(isException ? .primary : .secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(text)
+                    .font(.subheadline)
+                    .fontWeight(isException ? .medium : .regular)
+                    .foregroundStyle(isException ? .primary : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // The reasons behind a collapsed closure. Quiet on purpose:
+                // that school is out is the news, and why is the footnote —
+                // but it stays on screen, because deleting the reasons to
+                // tidy the line would be losing information to look neater.
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
 
             Spacer(minLength: 0)
         }
