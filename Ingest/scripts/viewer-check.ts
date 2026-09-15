@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { sha256Hex, randomToken } from "../src/auth";
+import { isOwnerRoute } from "../src/index";
 import {
   authenticateViewer,
   handleCreateInvite,
@@ -180,4 +181,43 @@ if (failures > 0) {
   console.error(`${failures} viewer failure(s).`);
   process.exit(1);
 }
+// --- router reachability ---------------------------------------------------
+//
+// These handlers are exercised directly above, which is exactly why a routing
+// bug survived: every owner handler worked when called, and `/v1/reports/ack`
+// still returned 404 in production because the gate never let the request
+// reach it. The gate admitted `/v1/viewers` by prefix and `/v1/reports` by
+// exact equality.
+//
+// So this checks the gate itself, against every path the app actually calls.
+{
+  const appCalls = [
+    "/v1/snapshot",
+    "/v1/viewers",
+    "/v1/viewers/invite",
+    "/v1/viewers/revoke",
+    "/v1/reports",
+    "/v1/reports/ack",
+  ];
+
+  for (const path of appCalls) {
+    if (!isOwnerRoute(path)) {
+      console.error(`FAIL owner route unreachable: ${path}`);
+      process.exitCode = 1;
+    }
+  }
+
+  // Viewer and unauthenticated routes are handled before the owner block and
+  // must NOT be swept into it — that would demand an owner key for a viewer.
+  for (const path of ["/v1/viewer/snapshot", "/v1/viewer/reports", "/v1/viewers/redeem", "/v1/pending"]) {
+    if (isOwnerRoute(path)) {
+      console.error(`FAIL non-owner route captured by the owner gate: ${path}`);
+      process.exitCode = 1;
+    }
+  }
+
+  if (process.exitCode === 1) process.exit(1);
+  console.log("Router: every owner route the app calls is reachable.");
+}
+
 console.log("Viewers: all cases OK.");

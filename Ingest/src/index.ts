@@ -86,6 +86,32 @@ async function handleProvision(request: Request, env: Env): Promise<Response> {
   });
 }
 
+/** Every path served by the owner-authenticated block below.
+ *
+ * A list rather than a prefix test, and exported so it can be checked, because
+ * the first version was three hand-written conditions that had to stay in step
+ * with seven handlers — and didn't. `/v1/viewers` was matched with startsWith
+ * while `/v1/reports` was matched for exact equality, so `/v1/reports/ack`
+ * never entered the block and fell through to the 404 at the bottom. Its
+ * handler sat inside, unreachable. Listing reports worked; marking one handled
+ * returned "not found" from a server that had the code to do it.
+ *
+ * Adding a handler below means adding its path here. That is the whole point:
+ * one list, and a check that every route the app calls is on it.
+ */
+export const OWNER_ROUTES: readonly string[] = [
+  "/v1/snapshot",
+  "/v1/viewers",
+  "/v1/viewers/invite",
+  "/v1/viewers/revoke",
+  "/v1/reports",
+  "/v1/reports/ack",
+];
+
+export function isOwnerRoute(pathname: string): boolean {
+  return OWNER_ROUTES.includes(pathname);
+}
+
 /** How many times one email may be handed to the model before we stop paying
  * to retry it. Counted at claim time, so a pass killed mid-call counts too.
  * Three is enough to ride out a rate limit or a deploy, and small enough that
@@ -572,7 +598,7 @@ export default {
     }
 
     // Owner-only from here: publishing, inviting, revoking, reading reports.
-    if (url.pathname.startsWith("/v1/viewers") || url.pathname === "/v1/snapshot" || url.pathname === "/v1/reports") {
+    if (isOwnerRoute(url.pathname)) {
       const household = await authenticateHousehold(request, env);
       if (!household) return json({ error: "unauthorized" }, 401);
 
