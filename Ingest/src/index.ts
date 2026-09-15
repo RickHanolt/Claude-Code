@@ -5,6 +5,7 @@ import { collapseDuplicates, contentFingerprint, isDuplicateEvent, type Existing
 import { selectAttachment, type StoredAttachment } from "./attachments";
 import { extractImageURLs, fetchRemoteImages } from "./remoteImages";
 import { DEFAULT_TIMEZONE } from "./timezone";
+import { fromStoredLunch, toStoredLunch } from "./lunch";
 import {
   authenticateViewer,
   handleAckReports,
@@ -291,8 +292,8 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
       // events or nothing landed and the retry is clean.
       const insertException = env.DB.prepare(
         `INSERT OR REPLACE INTO candidate_exceptions
-           (id, forwarded_email_id, household_id, day, field, value, is_notable, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, forwarded_email_id, household_id, day, field, value, is_notable, note, lunch_provided)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
 
       const insertEvent = env.DB.prepare(
@@ -315,7 +316,9 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
             exception.field,
             exception.value,
             exception.isNotable ? 1 : 0,
-            exception.note
+            exception.note,
+            // Three states, not coerced to a boolean. See src/lunch.ts.
+            toStoredLunch(exception.lunchProvided)
           )
         ),
         ...fresh.map((event) =>
@@ -429,7 +432,7 @@ async function handlePending(request: Request, env: Env, ctx: ExecutionContext):
 
   const exceptionRows = await env.DB.prepare(
     `SELECT id, forwarded_email_id as forwardedEmailId, day, field, value,
-            is_notable as isNotable, note
+            is_notable as isNotable, note, lunch_provided as lunchProvided
      FROM candidate_exceptions WHERE household_id = ? AND consumed_at IS NULL
      ORDER BY day ASC`
   )
@@ -440,7 +443,13 @@ async function handlePending(request: Request, env: Env, ctx: ExecutionContext):
   // JSONDecoder will not read a number as a Swift Bool.
   const exceptions = (exceptionRows.results ?? []).map((row) => {
     const exception = row as Record<string, unknown>;
-    return { ...exception, isNotable: Boolean(exception.isNotable) };
+    return {
+      ...exception,
+      isNotable: Boolean(exception.isNotable),
+      // Null survives the boundary — it is not the same as "no meal". See
+      // src/lunch.ts.
+      lunchProvided: fromStoredLunch(exception.lunchProvided),
+    };
   });
 
   // Converted at the boundary, exactly as isAllDay is below, and for the same

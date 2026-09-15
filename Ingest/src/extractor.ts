@@ -76,7 +76,26 @@ const ExtractedException = z.object({
   isNotable: z
     .boolean()
     .describe(
-      "True when this needs the parent's attention (a change from routine). False when it merely fills in a detail that varies daily and means nothing is wrong, like the day's menu item."
+      "True when this needs the parent's attention (a change from routine). False when it merely fills in a detail that varies daily and means nothing is wrong, like the day's menu item. For a lunch line, set it to match lunchProvided: true when a lunch must be packed, false when a meal is provided."
+    ),
+  /* Lunch is the one field where notability can't be judged here.
+   *
+   * Whether a packed lunch is news depends on the kid, and the first attempt
+   * guessed it from a prior ("school lunch is normal, packing is the
+   * exception") — which was exactly backwards for a kid who packs, flagging
+   * his twenty ordinary days and staying silent on the days a meal was
+   * already bought.
+   *
+   * Tying it to the kid's usual habit doesn't survive either: order a month of
+   * hot lunches and the habit inverts. So this reports the invariant instead —
+   * did a meal get provided, yes or no — and the app turns that into emphasis
+   * by asking whether anyone at home has to act. That question has the same
+   * answer in every household and every month. */
+  lunchProvided: z
+    .boolean()
+    .nullable()
+    .describe(
+      "Only for field 'lunch'. True when a meal is provided or ordered and nobody at home has to make one. False when no meal is provided and a lunch must be packed. Null for every other field, and for a lunch line where the document genuinely does not say."
     ),
   note: z
     .string()
@@ -125,9 +144,11 @@ Rules:
 - If the email contains no real dated events, return an empty list. That is a valid and common answer.
 
 Some documents are not lists of events at all. A lunch-ordering calendar, a menu, or a class-rotation schedule describes what a child needs on each ordinary day. Put those in "exceptions", not "events" — a parent does not want twenty calendar entries saying "packed lunch".
-- A day marked as ordered or provided is one exception for that date. A day marked as needing nothing is one exception saying so, with the reason if the document gives one.
-- A plain weekday with no marking usually means the routine applies and needs no exception at all. Only emit one if the document positively says something about that day.
-- Set isNotable true when a parent must act or change something, false when you are only filling in a detail that varies every day anyway.
+- On a lunch-ordering calendar, EVERY school day shown is a fact, including the blank ones. A day with an order marked means a meal is provided. A day with no order marked means no meal is provided and a lunch has to be packed. Emit an exception for both kinds — a blank school day on an ordering calendar is an answer, not a gap.
+- For a lunch exception set lunchProvided: true when a meal is provided or ordered, false when one must be packed. Leave it null for every other field.
+- Phrase a lunch value as what the morning actually requires: "Pack a lunch" when lunchProvided is false, "Lunch provided" — or the dish, if the document names it — when true.
+- For a lunch line, set isNotable to agree with lunchProvided — true when a lunch must be packed, false when a meal is provided. The app normally reads lunchProvided and ignores isNotable here, but falls back to it if lunchProvided is missing, so the two must never contradict each other. For every other field set isNotable true when a parent must act or change something, false when you are only filling in a detail that varies every day anyway.
+- A closed day is not a pack-a-lunch day. If a date is a holiday, a break, or otherwise marked as no school, emit the closure as an event and no lunch exception for it. The same goes for weekends and any day outside the school week.
 - A document can produce both: a menu with "no school" on one date gives an exception for the routine and an event for the closure.
 - Any attached calendars, flyers or schedules are part of this email. Read every date in them, not just the ones repeated in the body — a year-at-a-glance calendar listing sixty dates should produce sixty entries.
 - A date range in an attachment ("3/25-4/2 Easter Break", "23-27 Thanksgiving Break") is ONE entry spanning it, not one per day.

@@ -62,7 +62,8 @@ struct SnapshotService {
                     value: $0.value,
                     source: $0.sourceRaw,
                     provenance: $0.provenance,
-                    isNotable: $0.isNotable
+                    isNotable: $0.isNotable,
+                    lunchProvided: $0.lunchProvided
                 )
             },
             events: events.sorted { $0.externalID < $1.externalID }.map {
@@ -186,7 +187,8 @@ struct SnapshotService {
                 value: exception.value,
                 source: DayExceptionSource(rawValue: exception.source) ?? .email,
                 provenance: exception.provenance,
-                isNotable: exception.isNotable
+                isNotable: exception.isNotable,
+                lunchProvided: exception.lunchProvided
             )
             record.id = exception.id
             modelContext.insert(record)

@@ -135,6 +135,19 @@ final class DayException {
     /// is one; the bulk feeds set it false explicitly.
     var isNotable: Bool = true
 
+    /// Whether a meal was provided that day — true provided, false must be
+    /// packed, nil not stated.
+    ///
+    /// Stored as a fact rather than folded into `isNotable` at ingest, because
+    /// the rule that turns it into emphasis is the thing most likely to change
+    /// and re-reading a Boonli month to correct old rows is not something a
+    /// parent should have to do. `DayPlanResolver` owns the interpretation.
+    ///
+    /// Nil is a real third state, not a stand-in for false: it's what a manual
+    /// override, a non-lunch field, and every row predating this property all
+    /// carry, and treating it as "no meal" would alert on all of them.
+    var lunchProvided: Bool? = nil
+
     var field: DayField {
         get { DayField(rawValue: fieldRaw) ?? .reminder }
         set { fieldRaw = newValue.rawValue }
@@ -159,7 +172,8 @@ final class DayException {
         value: String,
         source: DayExceptionSource,
         provenance: String? = nil,
-        isNotable: Bool = true
+        isNotable: Bool = true,
+        lunchProvided: Bool? = nil
     ) {
         self.id = DayException.identity(kidID: kidID, day: day, field: field, source: source)
         self.kidID = kidID
@@ -169,5 +183,6 @@ final class DayException {
         self.sourceRaw = source.rawValue
         self.provenance = provenance
         self.isNotable = isNotable
+        self.lunchProvided = lunchProvided
     }
 }

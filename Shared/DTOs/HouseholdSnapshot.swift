@@ -72,5 +72,10 @@ struct HouseholdSnapshot: Codable, Sendable {
         var source: String
         var provenance: String?
         var isNotable: Bool
+
+        /// Optional so a snapshot published by an older owner build still
+        /// decodes — the viewer then falls back to the baseline display rather
+        /// than failing the whole payload.
+        var lunchProvided: Bool?
     }
 }

@@ -86,6 +86,34 @@ enum DayPlanResolver {
                 return ResolvedField(field: field, value: baseline, isException: false, provenance: nil)
             }
 
+            // Lunch is decided by whether anyone at home has to act, not by
+            // whether the day differs from the usual.
+            //
+            // The usual is not a fixed thing. A kid who packs every day is a
+            // kid who packs until the month somebody orders twenty hot lunches,
+            // and a rule anchored to his habit inverts with it — silently, and
+            // in the direction that sends him to school with nothing. Whether a
+            // meal got provided is the same question in every household and
+            // every month, so that is what gets asked.
+            //
+            // Note this drops the `value != baseline` guard the other fields
+            // use, deliberately: a baseline of "Packs a lunch" against a value
+            // of "Pack a lunch" is two spellings of one fact, and string
+            // comparison reads it as news. The fact is already in hand; there
+            // is nothing to infer from the prose.
+            if field == .lunch {
+                return ResolvedField(
+                    field: field,
+                    value: winner.value,
+                    // The fallback matters as much as the rule. If the fact is
+                    // missing, trust the source's own judgement rather than the
+                    // string comparison — which is the one path that can go
+                    // silent on a day a lunch is genuinely needed.
+                    isException: winner.lunchProvided.map { !$0 } ?? winner.isNotable,
+                    provenance: winner.provenance
+                )
+            }
+
             return ResolvedField(
                 field: field,
                 value: winner.value,

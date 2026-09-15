@@ -117,6 +117,7 @@ struct PendingIngestor {
                 match.value = exception.value
                 match.provenance = exception.note ?? subject
                 match.isNotable = exception.isNotableException
+                match.lunchProvided = exception.lunchProvided
             } else {
                 modelContext.insert(
                     DayException(
@@ -126,7 +127,8 @@ struct PendingIngestor {
                         value: exception.value,
                         source: .email,
                         provenance: exception.note ?? subject,
-                        isNotable: exception.isNotableException
+                        isNotable: exception.isNotableException,
+                        lunchProvided: exception.lunchProvided
                     )
                 )
             }

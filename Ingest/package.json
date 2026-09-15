@@ -9,14 +9,15 @@
     "db:migrate:remote": "wrangler d1 migrations apply schoolsync_ingest --remote",
     "typecheck": "tsc --noEmit",
     "check:schema": "tsx scripts/schema-check.ts",
-    "check": "npm run check:schema && npm run check:dates && npm run check:dedupe && npm run check:attachments && npm run check:mealviewer && npm run check:viewers && npm run check:remote-images && npm run check:match",
+    "check": "npm run check:schema && npm run check:dates && npm run check:dedupe && npm run check:attachments && npm run check:mealviewer && npm run check:viewers && npm run check:remote-images && npm run check:match && npm run check:lunch",
     "check:dates": "tsx scripts/date-check.ts",
     "check:dedupe": "tsx scripts/dedupe-check.ts",
     "check:attachments": "tsx scripts/attachment-check.ts",
     "check:mealviewer": "tsx scripts/mealviewer-check.ts",
     "check:viewers": "tsx scripts/viewer-check.ts",
     "check:remote-images": "tsx scripts/remote-images-check.ts",
-    "check:match": "tsx scripts/match-check.ts"
+    "check:match": "tsx scripts/match-check.ts",
+    "check:lunch": "tsx scripts/lunch-check.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240925.0",

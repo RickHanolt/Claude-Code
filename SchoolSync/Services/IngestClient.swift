@@ -98,7 +98,26 @@ struct PendingCandidateException: Codable, Identifiable, Hashable {
 
     var isNotableException: Bool { isNotable ?? true }
 
+    /// Whether a meal was provided that day: true provided, false must be
+    /// packed, nil the document didn't say.
+    ///
+    /// Three states rather than two, and the third is load-bearing — nil has to
+    /// stay distinguishable from false, or every row written before this field
+    /// existed decodes as "no meal is coming" and alerts.
+    var lunchProvided: Bool?
+
     var dayFieldValue: DayField { DayField(rawValue: field) ?? .reminder }
+
+    /// What the review screen should mark, matching what Morning Mode will
+    /// show once this is saved.
+    ///
+    /// Mirrors `DayPlanResolver`'s lunch branch on purpose. A review screen
+    /// that grades a line differently from the screen it feeds is worse than no
+    /// review screen — it teaches the user that the marks mean nothing.
+    var needsAction: Bool {
+        if dayFieldValue == .lunch, let lunchProvided { return !lunchProvided }
+        return isNotableException
+    }
 }
 
 struct PendingResponse: Codable {

@@ -331,9 +331,9 @@ private struct PendingEmailConfirmView: View {
                 Section {
                     ForEach(exceptions) { exception in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Image(systemName: exception.isNotableException ? "exclamationmark.circle.fill" : "circle")
+                            Image(systemName: exception.needsAction ? "exclamationmark.circle.fill" : "circle")
                                 .font(.caption2)
-                                .foregroundStyle(exception.isNotableException ? Color.accentColor : Color.secondary)
+                                .foregroundStyle(exception.needsAction ? Color.accentColor : Color.secondary)
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("\(exception.day) · \(exception.dayFieldValue.label)")
@@ -355,7 +355,7 @@ private struct PendingEmailConfirmView: View {
                     // each one would be worse than useless; they save together
                     // with the kid chosen below, and any day can be corrected
                     // afterwards.
-                    Text("Saved together for the kid you choose below. A marked line needs your attention; an unmarked one just fills in that day's detail.")
+                    Text("Saved together for the kid you choose below. A marked line is something you have to do that morning — pack a lunch, send a costume. An unmarked one just fills in that day's detail.")
                 }
             }
 
