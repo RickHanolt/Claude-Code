@@ -195,17 +195,6 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
       // Appended after the real attachments, so a genuine PDF still leads.
       const inputs = [...(attachments.results ?? []), ...remote.images];
 
-      // Recorded whether or not anything failed. A picture that couldn't be
-      // read is the one thing a person needs to know when an email produces
-      // less than they expected, and "Pizza/Jean Day" went missing for weeks
-      // precisely because nothing said so anywhere.
-      const note = [email.attachmentNote, remote.note].filter(Boolean).join("\n") || null;
-      if (note !== email.attachmentNote) {
-        await env.DB.prepare("UPDATE forwarded_emails SET attachment_note = ? WHERE id = ?")
-          .bind(note, email.id)
-          .run();
-      }
-
       const { events, exceptions } = await extractEvents(
         env.ANTHROPIC_API_KEY,
         email.subject,
@@ -214,6 +203,23 @@ async function extractPendingEmails(env: Env, householdID: string): Promise<void
         inputs,
         timeZone
       );
+
+      // Written after extraction, because whether a missing picture mattered
+      // depends on what came back without it. An email that yielded fifty
+      // dates lost nothing worth mentioning; one that yielded none, while
+      // carrying pictures, is the case worth a person's attention.
+      const note =
+        [email.attachmentNote, ...remote.problems, ...remote.skipped].filter(Boolean).join("\n") || null;
+
+      const cameBackEmpty = events.length === 0 && exceptions.length === 0;
+      const hadSomethingToRead = inputs.length > 0 || referenced.length > 0;
+      const needsAttention = remote.problems.length > 0 || (cameBackEmpty && hadSomethingToRead);
+
+      await env.DB.prepare(
+        "UPDATE forwarded_emails SET attachment_note = ?, needs_attention = ? WHERE id = ?"
+      )
+        .bind(note, needsAttention ? 1 : 0, email.id)
+        .run();
 
       // Drop events this household already has. Two emails can describe the
       // same event — a newsletter and the reminder that follows it — and each
@@ -361,7 +367,8 @@ async function handlePending(request: Request, env: Env, ctx: ExecutionContext):
     `SELECT id, sender, subject, body_text as bodyText, received_at as receivedAt,
             extraction_status as extractionStatus,
             extraction_error as extractionError,
-            attachment_note as attachmentNote
+            attachment_note as attachmentNote,
+            needs_attention as needsAttention
      FROM forwarded_emails WHERE household_id = ? AND consumed_at IS NULL
      ORDER BY received_at ASC`
   )
@@ -410,8 +417,18 @@ async function handlePending(request: Request, env: Env, ctx: ExecutionContext):
     return { ...exception, isNotable: Boolean(exception.isNotable) };
   });
 
+  // Converted at the boundary, exactly as isAllDay is below, and for the same
+  // reason: needs_attention is an INTEGER in SQLite, D1 hands back 0/1, and
+  // Swift's JSONDecoder refuses to read a number as a Bool — failing the WHOLE
+  // response, not the one field. That is how a single date-only string once
+  // hid every email behind "the data couldn't be read".
+  const emails_ = (emails.results ?? []).map((row) => {
+    const email = row as Record<string, unknown>;
+    return { ...email, needsAttention: Boolean(email.needsAttention) };
+  });
+
   return json({
-    emails: emails.results,
+    emails: emails_,
     events: collapseDuplicates(events_),
     exceptions,
   });

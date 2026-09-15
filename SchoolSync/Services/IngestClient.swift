@@ -27,6 +27,19 @@ struct PendingForwardedEmail: Codable, Identifiable, Hashable {
     /// about a document it never saw.
     var attachmentNote: String?
 
+    /// Whether this email is worth interrupting someone about.
+    ///
+    /// Distinct from `attachmentNote`, which records everything that happened
+    /// to an email's pictures — most of it routine. The backend sets this only
+    /// when something was tried and failed, or when an email carried pictures
+    /// and produced nothing at all. A newsletter that yielded fifty dates while
+    /// declining to download seventeen logos is not a problem, and a warning
+    /// raised for it is a warning nobody reads on the day one matters.
+    ///
+    /// Optional for the sake of an app talking to a backend that predates the
+    /// field; absent reads as "no".
+    var needsAttention: Bool?
+
     var isStillExtracting: Bool {
         guard let extractionStatus else { return false }
         return extractionStatus == "pending" || extractionStatus == "processing"

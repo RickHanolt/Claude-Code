@@ -1,0 +1,12 @@
+-- Whether an email is worth interrupting someone about.
+--
+-- Separate from `attachment_note`, which records everything that happened to
+-- an email's pictures. Most of that is routine: decorations below the size
+-- floor, images past the fetch budget. A real newsletter produced fifty dates
+-- and still reported "17 of 29 pictures weren't downloaded" — true, harmless,
+-- and exactly the kind of line that makes a warning into wallpaper.
+--
+-- This flag is set only when something was TRIED and FAILED: an image refused
+-- for its size or type, a download that errored, or an email that carried
+-- pictures and yielded nothing at all. Those might have cost a date.
+ALTER TABLE forwarded_emails ADD COLUMN needs_attention INTEGER NOT NULL DEFAULT 0;

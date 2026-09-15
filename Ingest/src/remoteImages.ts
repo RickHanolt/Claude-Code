@@ -129,9 +129,22 @@ export function extractImageURLs(html: string): string[] {
 export interface RemoteImageResult {
   /** What actually goes to the model, largest first. */
   images: StoredAttachment[];
-  /** What happened, in a sentence someone can act on. Null when everything
-   * referenced was read and sent. */
-  note: string | null;
+
+  /** Things that were tried and failed, and so might have cost something: an
+   * image refused for its size or type, a download that errored. Any of these
+   * could have been the calendar.
+   *
+   * This is the ONLY thing that earns a warning on someone's phone. */
+  problems: string[];
+
+  /** Things deliberately not done — decorations below the floor, pictures past
+   * the fetch budget. Worth recording, never worth interrupting anyone.
+   *
+   * Conflating these with problems is how a working extraction that produced
+   * fifty dates still reported "17 of 29 pictures weren't downloaded" as though
+   * something were wrong. A warning that appears when nothing is wrong is a
+   * warning nobody reads on the day something is. */
+  skipped: string[];
 }
 
 /** Downloads what `extractImageURLs` found, then sends only the biggest few.
@@ -144,14 +157,14 @@ export interface RemoteImageResult {
  * `img023885`, so filename heuristics were never going to work anyway.
  *
  * Failures are collected rather than thrown. One unreachable picture must not
- * cost an email its extraction — the prose is still worth reading, and the note
- * says what was lost.
+ * cost an email its extraction — the prose is still worth reading, and the
+ * problems list says what was lost.
  */
 export async function fetchRemoteImages(
   urls: string[],
   fetchImpl: typeof fetch = fetch
 ): Promise<RemoteImageResult> {
-  if (urls.length === 0) return { images: [], note: null };
+  if (urls.length === 0) return { images: [], problems: [], skipped: [] };
 
   const candidates: StoredAttachment[] = [];
   const problems: string[] = [];
@@ -222,22 +235,18 @@ export async function fetchRemoteImages(
   const unsent = candidates.length - images.length;
   const unlooked = Math.max(0, urls.length - MAX_FETCHED);
 
-  const summary: string[] = [...problems];
+  const skipped: string[] = [];
   if (unsent > 0) {
-    summary.push(`${unsent} smaller picture${unsent === 1 ? "" : "s"} weren't sent — only the ${MAX_SENT} largest are read`);
+    skipped.push(`${unsent} smaller picture${unsent === 1 ? "" : "s"} weren't sent — only the ${MAX_SENT} largest are read`);
   }
   if (unlooked > 0 || stoppedEarly) {
-    summary.push(
-      `${unlooked} of ${urls.length} pictures weren't downloaded — forward any that matter on their own`
-    );
+    skipped.push(`${unlooked} of ${urls.length} pictures weren't downloaded`);
   }
-  if (decorations > 0 && images.length === 0) {
-    // Only worth saying when nothing survived. Otherwise it is noise about
-    // logos nobody wanted.
-    summary.push(`${decorations} picture${decorations === 1 ? " was" : "s were"} too small to be a document`);
+  if (decorations > 0) {
+    skipped.push(`${decorations} picture${decorations === 1 ? " was" : "s were"} too small to be a document`);
   }
 
-  return { images, note: summary.length > 0 ? summary.join("\n") : null };
+  return { images, problems, skipped };
 }
 
 /** A filename the model and a person can both use. The last path segment is

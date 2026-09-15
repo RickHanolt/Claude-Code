@@ -45,7 +45,12 @@ struct SyncCoordinator {
                 // its explanation attached — and that is exactly the email most
                 // likely to have lost a calendar picture on the way in.
                 for email in pending.emails {
-                    guard let note = email.attachmentNote, !note.isEmpty else { continue }
+                    // The flag decides, not the note. The note is a record of
+                    // everything that happened to an email's pictures, and most
+                    // of that is routine housekeeping nobody needs woken for.
+                    guard email.needsAttention == true,
+                          let note = email.attachmentNote, !note.isEmpty
+                    else { continue }
                     AttentionNotices.record(
                         AttentionNotice(
                             id: email.id,

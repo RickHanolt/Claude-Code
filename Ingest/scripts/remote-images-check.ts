@@ -4,6 +4,11 @@
  */
 import { extractImageURLs, fetchRemoteImages } from "../src/remoteImages";
 
+/** The old single-note view, for checks that only care that something was
+ * said. Checks about WHICH list a message lands in assert on that directly. */
+const noteOf = (r: { problems: string[]; skipped: string[] }) =>
+  [...r.problems, ...r.skipped].join("\n") || null;
+
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
   if (condition) return;
@@ -82,7 +87,7 @@ const base = "https://cdn.example-mail.com";
 
 const kept = await fetchRemoteImages([`${base}/calendar.png`], fakeFetch as typeof fetch);
 check("keeps a real calendar image", kept.images.length === 1);
-check("no note when everything read", kept.note === null, String(kept.note));
+check("no note when everything read", noteOf(kept) === null, String(noteOf(kept)));
 check("base64 round-trips", kept.images[0]?.data.length ? atob(kept.images[0].data).length === 200_000 : false);
 
 const pixel = await fetchRemoteImages(
@@ -90,31 +95,32 @@ const pixel = await fetchRemoteImages(
   fakeFetch as typeof fetch
 );
 check("drops tracking pixels", pixel.images.length === 1);
-// Silent only while something real survived. When nothing does, the count is
-// the whole story — see the all-tiny case below.
-check("doesn't natter about logos when a real image got through", pixel.note === null, String(pixel.note));
+// Recorded, never a warning. This is the whole point of the split: a logo we
+// declined to send is not a thing to interrupt someone about.
+check("a dropped logo is never a problem", pixel.problems.length === 0, JSON.stringify(pixel.problems));
+check("a dropped logo is still recorded", pixel.skipped.some((m) => m.includes("too small")));
 
 const wrongType = await fetchRemoteImages([`${base}/html.png`], fakeFetch as typeof fetch);
 check("refuses non-images", wrongType.images.length === 0);
-check("says why a non-image was refused", (wrongType.note ?? "").includes("isn't an image"));
+check("says why a non-image was refused", (noteOf(wrongType) ?? "").includes("isn't an image"));
 
 const missing = await fetchRemoteImages([`${base}/missing.png`], fakeFetch as typeof fetch);
-check("reports HTTP failures", (missing.note ?? "").includes("404"));
+check("reports HTTP failures", (noteOf(missing) ?? "").includes("404"));
 
 const huge = await fetchRemoteImages([`${base}/huge.png`], fakeFetch as typeof fetch);
 check("refuses oversized images", huge.images.length === 0);
-check("says an image was too large", (huge.note ?? "").includes("too large"));
+check("says an image was too large", (noteOf(huge) ?? "").includes("too large"));
 
 const boom = await fetchRemoteImages([`${base}/boom.png`], fakeFetch as typeof fetch);
 check("survives a network error", boom.images.length === 0);
-check("reports a network error", (boom.note ?? "").includes("couldn't be downloaded"));
+check("reports a network error", (noteOf(boom) ?? "").includes("couldn't be downloaded"));
 
 const many = await fetchRemoteImages(
   Array.from({ length: 20 }, (_, i) => `${base}/calendar-${i}.png`),
   fakeFetch as typeof fetch
 );
 check("sends only the largest few", many.images.length === 5, String(many.images.length));
-check("says how many were never downloaded", (many.note ?? "").includes("8 of 20"));
+check("says how many were never downloaded", (noteOf(many) ?? "").includes("8 of 20"));
 
 // THE REGRESSION THAT MATTERS.
 //
@@ -138,7 +144,30 @@ const allTiny = await fetchRemoteImages(
   Array.from({ length: 3 }, (_, i) => `${base}/pixel-${i}.png`),
   fakeFetch as typeof fetch
 );
-check("nothing sent is stated, not implied", (allTiny.note ?? "").includes("too small to be a document"));
+check("nothing sent is stated, not implied", (noteOf(allTiny) ?? "").includes("too small to be a document"));
+
+// --- the split itself ------------------------------------------------------
+//
+// This is what stops Morning Mode carrying a permanent warning. A newsletter
+// that yielded fifty dates still reported "17 of 29 pictures weren't
+// downloaded"; true, harmless, and exactly the line that turns a warning into
+// wallpaper.
+
+const budgeted = await fetchRemoteImages(
+  Array.from({ length: 20 }, (_, i) => `${base}/calendar-${i}.png`),
+  fakeFetch as typeof fetch
+);
+check("declining to fetch is never a problem", budgeted.problems.length === 0, JSON.stringify(budgeted.problems));
+check("declining to fetch is recorded", budgeted.skipped.some((m) => m.includes("weren't downloaded")));
+check("not sending the smaller ones is recorded", budgeted.skipped.some((m) => m.includes("weren't sent")));
+
+const refused = await fetchRemoteImages(
+  [`${base}/huge.png`, `${base}/html.png`, `${base}/missing.png`, `${base}/boom.png`],
+  fakeFetch as typeof fetch
+);
+check("tried-and-failed IS a problem", refused.problems.length === 4, JSON.stringify(refused.problems));
+check("tried-and-failed is not filed as merely skipped",
+  !refused.skipped.some((m) => m.includes("too large") || m.includes("HTTP")));
 
 // Largest first, so the page of small print outranks the club photo.
 const ordered = await fetchRemoteImages(
@@ -164,7 +193,7 @@ const staleList = await fetchRemoteImages(
   fakeFetch as typeof fetch
 );
 check("skips boilerplate in a previously-captured list", staleList.images.length === 1);
-check("doesn't blame the skipped boilerplate", (staleList.note ?? "") === "", String(staleList.note));
+check("doesn't blame the skipped boilerplate", (noteOf(staleList) ?? "") === "", String(noteOf(staleList)));
 
 // A 3.1MB calendar scan must now go through. The old 1.35MB ceiling was
 // inherited from D1's storage limit, which does not apply to something that is
@@ -173,10 +202,10 @@ const bigButFine = await fetchRemoteImages(
   [`${base}/scan.png`],
   (async () => reply(new Uint8Array(3_100_000).fill(65))) as typeof fetch
 );
-check("accepts a 3.1MB scan", bigButFine.images.length === 1, String(bigButFine.note));
+check("accepts a 3.1MB scan", bigButFine.images.length === 1, String(noteOf(bigButFine)));
 
 const none = await fetchRemoteImages([], fakeFetch as typeof fetch);
-check("no urls means no note", none.images.length === 0 && none.note === null);
+check("no urls means no note", none.images.length === 0 && noteOf(none) === null);
 
 // One bad picture must not cost the good one beside it.
 const mixed = await fetchRemoteImages(
@@ -184,7 +213,7 @@ const mixed = await fetchRemoteImages(
   fakeFetch as typeof fetch
 );
 check("one failure doesn't lose the others", mixed.images.length === 1);
-check("failure is still reported", (mixed.note ?? "").includes("couldn't be downloaded"));
+check("failure is still reported", (noteOf(mixed) ?? "").includes("couldn't be downloaded"));
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);
