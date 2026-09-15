@@ -1,5 +1,4 @@
 import XCTest
-@testable import SchoolSync
 
 /// What is allowed to switch off a school morning.
 ///

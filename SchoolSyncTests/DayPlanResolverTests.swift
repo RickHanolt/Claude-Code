@@ -1,6 +1,5 @@
 import XCTest
 import SwiftData
-@testable import SchoolSync
 
 /// What gets emphasised on a morning panel.
 ///

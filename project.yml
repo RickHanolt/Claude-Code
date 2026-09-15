@@ -91,13 +91,23 @@ targets:
   SchoolSyncTests:
     type: bundle.unit-test
     platform: iOS
+    # Compiles Shared directly and declares no host application, which is the
+    # whole reason this runs at all.
+    #
+    # Hosting the bundle inside SchoolSync means running the tests launches the
+    # app, and an unsigned simulator build carries no entitlements, so
+    # AppGroup.containerURL hits its fatalError during startup and the process
+    # dies before the first assertion. Signing it to get around that would need
+    # a developer account in CI to check string matching.
+    #
+    # Nothing is duplicated — these are the same source files the app compiles,
+    # not a copy. The real constraint is that only Shared is reachable from
+    # here, which is the right pressure: a rule worth asserting belongs out of
+    # the view layer anyway, and EventDayMatching had to move to Shared before
+    # it could be tested at all.
     sources:
       - path: SchoolSyncTests
-    # Depending on the app rather than re-listing Shared: these tests reach the
-    # rules through `@testable import SchoolSync`, so they exercise the same
-    # compiled code the app ships instead of a second copy that could drift.
-    dependencies:
-      - target: SchoolSync
+      - path: Shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rickhanolt.schoolsync.tests

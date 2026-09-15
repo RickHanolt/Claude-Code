@@ -1,5 +1,4 @@
 import XCTest
-@testable import SchoolSync
 
 /// Whether a break that spans days shows up on all of them.
 ///
