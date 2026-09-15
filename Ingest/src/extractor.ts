@@ -95,7 +95,7 @@ const ExtractedException = z.object({
     .boolean()
     .nullable()
     .describe(
-      "Only for field 'lunch'. True when a meal is provided or ordered and nobody at home has to make one. False when no meal is provided and a lunch must be packed. Null for every other field, and for a lunch line where the document genuinely does not say."
+      "Only for field 'lunch'. True when a meal is provided or ordered and nobody at home has to make one. False when no meal is provided and a lunch must be packed. Null for every other field, and for a lunch day the document flags or annotates without saying which of the two it is."
     ),
   note: z
     .string()
@@ -146,8 +146,9 @@ Rules:
 Some documents are not lists of events at all. A lunch-ordering calendar, a menu, or a class-rotation schedule describes what a child needs on each ordinary day. Put those in "exceptions", not "events" — a parent does not want twenty calendar entries saying "packed lunch".
 - On a lunch-ordering calendar, EVERY school day shown is a fact, including the blank ones. A day with an order marked means a meal is provided. A day with no order marked means no meal is provided and a lunch has to be packed. Emit an exception for both kinds — a blank school day on an ordering calendar is an answer, not a gap.
 - For a lunch exception set lunchProvided: true when a meal is provided or ordered, false when one must be packed. Leave it null for every other field.
+- A day the calendar FLAGS or annotates without saying what the flag means is a day you do not know about. Set lunchProvided null and phrase the value as what is actually known — "Lunch flagged on the calendar" — never as an instruction. A flag can mean a special event lunch is served, or that ordering closed, or that the day is short; guessing "Pack a lunch" asserts something the document never said, on the one day it went out of its way to mark.
 - Phrase a lunch value as what the morning actually requires: "Pack a lunch" when lunchProvided is false, "Lunch provided" — or the dish, if the document names it — when true.
-- For a lunch line, set isNotable to agree with lunchProvided — true when a lunch must be packed, false when a meal is provided. The app normally reads lunchProvided and ignores isNotable here, but falls back to it if lunchProvided is missing, so the two must never contradict each other. For every other field set isNotable true when a parent must act or change something, false when you are only filling in a detail that varies every day anyway.
+- For a lunch line, set isNotable to agree with lunchProvided — true when a lunch must be packed, false when a meal is provided, and true for a flagged day you could not resolve, since an unexplained flag is exactly what a parent should look at. The app normally reads lunchProvided and ignores isNotable here, but falls back to it when lunchProvided is null, so the two must never contradict each other. For every other field set isNotable true when a parent must act or change something, false when you are only filling in a detail that varies every day anyway.
 - A closed day is not a pack-a-lunch day. If a date is a holiday, a break, or otherwise marked as no school, emit the closure as an event and no lunch exception for it. The same goes for weekends and any day outside the school week.
 - A document can produce both: a menu with "no school" on one date gives an exception for the routine and an event for the closure.
 - Any attached calendars, flyers or schedules are part of this email. Read every date in them, not just the ones repeated in the body — a year-at-a-glance calendar listing sixty dates should produce sixty entries.

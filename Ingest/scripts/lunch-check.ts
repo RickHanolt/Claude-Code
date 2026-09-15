@@ -62,5 +62,21 @@ check("undefined asserts nothing", lunchNeedsAction(undefined), null);
 check("wording cannot change a pack day", lunchNeedsAction(false), lunchNeedsAction(false));
 check("a provided day never alerts", lunchNeedsAction(true), false);
 
+// --- The flagged day ---------------------------------------------------------
+//
+// A lunch calendar that marks a date without saying why — Grandparents Day,
+// an early dismissal, a closed ordering window — is the case null exists for.
+// The flag could mean a special lunch is served or that nobody ordered one, and
+// extraction cannot tell which. Resolving it to false would put "Pack a lunch"
+// on a morning the school may well be feeding him, stated in alert weight, on
+// the one day the calendar went out of its way to mark.
+//
+// So this must stay unresolved here and defer to isNotable on the app side,
+// which carries true for a flag. The consumer decides; this function does not
+// get to guess.
+check("a flagged day resolves to no answer", lunchNeedsAction(null), null);
+check("a flagged day is not treated as a pack day", lunchNeedsAction(null) === true, false);
+check("a flagged day is not treated as provided", lunchNeedsAction(null) === false, false);
+
 console.log(failures === 0 ? "lunch-check: all passed" : `lunch-check: ${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);
