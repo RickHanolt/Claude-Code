@@ -28,12 +28,18 @@ const MAX_FETCHED = 12;
 const MAX_SENT = 5;
 
 /** Total bytes downloaded per email, so a page of large photographs can't run
- * up a bill on its own. */
-const MAX_TOTAL_BYTES = 5_000_000;
+ * up a bill on its own. Twelve images at the per-image ceiling would be 42MB;
+ * this is what actually stops that. */
+const MAX_TOTAL_BYTES = 12_000_000;
 
-/** Per image, before base64. Roughly the same ceiling the attachment path
- * uses, expressed in real bytes because here we control the fetch. */
-const MAX_IMAGE_BYTES = 1_350_000;
+/** Per image, before base64.
+ *
+ * Raised from 1.35MB after a real newsletter had a 3.1MB PNG refused. That
+ * ceiling was inherited from the attachment path, where it exists because D1
+ * caps a stored value at 2MB — but a remote image is never stored, only sent,
+ * so the binding limit is the API's 5MB per image. Base64 inflates by a third,
+ * so 3.5MB of original bytes lands comfortably under it. */
+const MAX_IMAGE_BYTES = 3_500_000;
 
 /** Below this it is a logo, an icon, or a tracking pixel — the same floor the
  * attachment path applies, and for the same reason: a legible calendar page is
@@ -157,6 +163,19 @@ export async function fetchRemoteImages(
     if (downloadedBytes >= MAX_TOTAL_BYTES) {
       stoppedEarly = true;
       break;
+    }
+
+    // Filtered here as well as at extraction. The two run at different times —
+    // URLs are captured when mail arrives, fetched when it's extracted — so a
+    // list captured before these rules existed, or replayed after a backend
+    // change, would otherwise still spend its budget on Giphy animations.
+    // Exactly that happened on the first successful run: two of twelve slots
+    // went to reaction GIFs stored days earlier.
+    try {
+      if (isBoilerplate(new URL(url))) continue;
+    } catch {
+      problems.push("a malformed image link was skipped");
+      continue;
     }
 
     const label = shortLabel(url);

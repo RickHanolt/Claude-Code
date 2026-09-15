@@ -61,7 +61,7 @@ check("keeps real content", filtered.length === 1, JSON.stringify(filtered));
 
 const CALENDAR = new Uint8Array(200_000).fill(65);
 const PIXEL = new Uint8Array(200).fill(65);
-const HUGE = new Uint8Array(1_400_000).fill(65);
+const HUGE = new Uint8Array(4_000_000).fill(65);
 
 function reply(body: Uint8Array, type = "image/png", status = 200): Response {
   return new Response(body, { status, headers: { "content-type": type } });
@@ -150,6 +150,30 @@ const ordered = await fetchRemoteImages(
   }) as typeof fetch
 );
 check("sends the biggest first", ordered.images[0]?.filename === "calendar.png", String(ordered.images[0]?.filename));
+
+// Boilerplate must be filtered at FETCH time too, not only at extraction.
+// A URL list captured before those rules existed — or replayed after a backend
+// change — otherwise spends its budget on reaction GIFs. This is what happened
+// on the first successful run against a real newsletter.
+const staleList = await fetchRemoteImages(
+  [
+    "https://media3.giphy.com/media/abc/giphy.gif",
+    "https://emailimage.flocknote.com/unoFooter?x=1",
+    `${base}/calendar.png`,
+  ],
+  fakeFetch as typeof fetch
+);
+check("skips boilerplate in a previously-captured list", staleList.images.length === 1);
+check("doesn't blame the skipped boilerplate", (staleList.note ?? "") === "", String(staleList.note));
+
+// A 3.1MB calendar scan must now go through. The old 1.35MB ceiling was
+// inherited from D1's storage limit, which does not apply to something that is
+// only ever sent.
+const bigButFine = await fetchRemoteImages(
+  [`${base}/scan.png`],
+  (async () => reply(new Uint8Array(3_100_000).fill(65))) as typeof fetch
+);
+check("accepts a 3.1MB scan", bigButFine.images.length === 1, String(bigButFine.note));
 
 const none = await fetchRemoteImages([], fakeFetch as typeof fetch);
 check("no urls means no note", none.images.length === 0 && none.note === null);
