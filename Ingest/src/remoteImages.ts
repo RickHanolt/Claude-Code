@@ -14,10 +14,22 @@
 
 import type { StoredAttachment } from "./attachments";
 
-/** How many to fetch from one email. A newsletter references dozens of
- * pictures — logos, buttons, a LEGO stock photo — and one or two of them are
- * the calendar. Past a handful we are paying to read decorations. */
-const MAX_IMAGES = 4;
+/** How many to download. Cheap — these are bytes, not model calls. */
+const MAX_FETCHED = 12;
+
+/** How many to actually hand the model. This is the number that costs, and it
+ * is deliberately separate from the one above.
+ *
+ * Conflating them is what made the first version useless: capped at four and
+ * taken in document order, every slot went to the header banner and the
+ * newsletter's decorative strips, which were then dropped as too small to be
+ * documents. Four fetches, nothing sent, and a note that said only "25 more
+ * weren't read". A school's year calendar sat in slot eleven. */
+const MAX_SENT = 5;
+
+/** Total bytes downloaded per email, so a page of large photographs can't run
+ * up a bill on its own. */
+const MAX_TOTAL_BYTES = 5_000_000;
 
 /** Per image, before base64. Roughly the same ceiling the attachment path
  * uses, expressed in real bytes because here we control the fetch. */
@@ -29,6 +41,30 @@ const MAX_IMAGE_BYTES = 1_350_000;
 const MIN_IMAGE_BYTES = 15_000;
 
 const SUPPORTED = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+/** Boilerplate every newsletter of this kind carries, matched on where it
+ * lives rather than what it looks like.
+ *
+ * Measured, not guessed: one real St. Mary's newsletter referenced 29 images,
+ * of which six were Giphy animations, two were file-type icons, one was a
+ * "no photo" placeholder and one was the platform's tracking pixel. Ten of
+ * twenty-nine, removed before a single byte is downloaded. */
+function isBoilerplate(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  const path = url.pathname.toLowerCase();
+
+  // Animated reaction GIFs. Never a calendar, frequently several per email.
+  if (host.endsWith("giphy.com")) return true;
+  // Open-tracking pixels, which exist to be fetched and say nothing.
+  if (host.startsWith("emailimage.")) return true;
+  // The platform's own furniture: file-type icons, avatars, placeholders.
+  if (path.includes("/images/files/")) return true;
+  if (path.includes("nophoto")) return true;
+  // Masthead strips. "bannar" is the platform's spelling, not a typo here.
+  if (/banner|bannar|logo|header|footer|divider|spacer/.test(path)) return true;
+
+  return false;
+}
 
 /** Hosts that are never a school's newsletter image and are the shape of an
  * attack rather than a mistake.
@@ -73,6 +109,7 @@ export function extractImageURLs(html: string): string[] {
     }
 
     if (isDisallowedHost(parsed.hostname)) continue;
+    if (isBoilerplate(parsed)) continue;
 
     const key = parsed.toString();
     if (seen.has(key)) continue;
@@ -84,17 +121,25 @@ export function extractImageURLs(html: string): string[] {
 }
 
 export interface RemoteImageResult {
+  /** What actually goes to the model, largest first. */
   images: StoredAttachment[];
-  /** Why the ones that didn't make it didn't, in a sentence someone can act
-   * on. Null when every referenced image was read, or none were referenced. */
+  /** What happened, in a sentence someone can act on. Null when everything
+   * referenced was read and sent. */
   note: string | null;
 }
 
-/** Fetches what `extractImageURLs` found, within the bounds above.
+/** Downloads what `extractImageURLs` found, then sends only the biggest few.
+ *
+ * Size is the signal, and it is a better one than it sounds. A school calendar
+ * is a full page of small print; a decorative strip is a few kilobytes. Nothing
+ * here needs to recognise a calendar — it only needs to prefer documents over
+ * ornaments, and bytes do that without a single filename heuristic. The one
+ * real newsletter this was built against names its files `unnamed73175` and
+ * `img023885`, so filename heuristics were never going to work anyway.
  *
  * Failures are collected rather than thrown. One unreachable picture must not
- * cost an email its extraction — the prose is still worth reading, and the
- * note says what was lost.
+ * cost an email its extraction — the prose is still worth reading, and the note
+ * says what was lost.
  */
 export async function fetchRemoteImages(
   urls: string[],
@@ -102,11 +147,18 @@ export async function fetchRemoteImages(
 ): Promise<RemoteImageResult> {
   if (urls.length === 0) return { images: [], note: null };
 
-  const images: StoredAttachment[] = [];
+  const candidates: StoredAttachment[] = [];
   const problems: string[] = [];
-  let skippedAsDecoration = 0;
+  let decorations = 0;
+  let downloadedBytes = 0;
+  let stoppedEarly = false;
 
-  for (const url of urls.slice(0, MAX_IMAGES)) {
+  for (const url of urls.slice(0, MAX_FETCHED)) {
+    if (downloadedBytes >= MAX_TOTAL_BYTES) {
+      stoppedEarly = true;
+      break;
+    }
+
     const label = shortLabel(url);
     try {
       const response = await fetchImpl(url, { redirect: "follow" });
@@ -122,29 +174,51 @@ export async function fetchRemoteImages(
       }
 
       const bytes = new Uint8Array(await response.arrayBuffer());
+      downloadedBytes += bytes.byteLength;
+
       if (bytes.byteLength > MAX_IMAGE_BYTES) {
         problems.push(`${label}: ${Math.round(bytes.byteLength / 1000)} KB is too large to send`);
         continue;
       }
-      // Counted, not listed. Every newsletter references a dozen logos and
-      // naming each one would bury the one line that matters.
       if (bytes.byteLength < MIN_IMAGE_BYTES) {
-        skippedAsDecoration += 1;
+        decorations += 1;
         continue;
       }
 
-      images.push({ filename: label, mediaType, data: base64(bytes) });
-    } catch (error) {
+      candidates.push({ filename: label, mediaType, data: base64(bytes) });
+    } catch {
       problems.push(`${label}: couldn't be downloaded`);
     }
   }
 
-  const beyondCap = urls.length - Math.min(urls.length, MAX_IMAGES);
-  if (beyondCap > 0) {
-    problems.push(`${beyondCap} more picture${beyondCap === 1 ? "" : "s"} weren't read — forward any that matter on their own`);
+  // Biggest first, then take the few that go to the model. `data` is base64,
+  // so its length is proportional to the original — no need to keep the raw
+  // byte count around just to sort by it.
+  candidates.sort((a, b) => b.data.length - a.data.length);
+  const images = candidates.slice(0, MAX_SENT);
+
+  // Reported, not merely counted. The first version tallied decorations
+  // silently, which is how four fetched images became zero sent images with
+  // nothing on the record saying so.
+  const unsent = candidates.length - images.length;
+  const unlooked = Math.max(0, urls.length - MAX_FETCHED);
+
+  const summary: string[] = [...problems];
+  if (unsent > 0) {
+    summary.push(`${unsent} smaller picture${unsent === 1 ? "" : "s"} weren't sent — only the ${MAX_SENT} largest are read`);
+  }
+  if (unlooked > 0 || stoppedEarly) {
+    summary.push(
+      `${unlooked} of ${urls.length} pictures weren't downloaded — forward any that matter on their own`
+    );
+  }
+  if (decorations > 0 && images.length === 0) {
+    // Only worth saying when nothing survived. Otherwise it is noise about
+    // logos nobody wanted.
+    summary.push(`${decorations} picture${decorations === 1 ? " was" : "s were"} too small to be a document`);
   }
 
-  return { images, note: problems.length > 0 ? problems.join("\n") : null };
+  return { images, note: summary.length > 0 ? summary.join("\n") : null };
 }
 
 /** A filename the model and a person can both use. The last path segment is
