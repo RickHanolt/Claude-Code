@@ -208,10 +208,19 @@ private struct KidPanel: View {
             VStack(alignment: .leading, spacing: 10) {
                 BlockWord(word: kid.name, colorSeed: kid.name.count, sizes: [24, 21, 18, 15])
 
-                VStack(alignment: .leading, spacing: 7) {
-                    FieldRow(field: plan.breakfast, accent: accent)
-                    FieldRow(field: plan.lunch, accent: accent)
-                    FieldRow(field: plan.clothing, accent: accent)
+                // Breakfast, lunch and uniform are all answers to "what does
+                // the school day need". On a day with no school they are
+                // answers to a question nobody is asking, and printing them
+                // costs the closure the prominence it should have.
+                //
+                // Events survive: a cross country meet at 3:30 still happens on
+                // a day off, and still needs someone to drive.
+                if !isClosed {
+                    VStack(alignment: .leading, spacing: 7) {
+                        FieldRow(field: plan.breakfast, accent: accent)
+                        FieldRow(field: plan.lunch, accent: accent)
+                        FieldRow(field: plan.clothing, accent: accent)
+                    }
                 }
 
                 if plan.reminders.isEmpty && events.isEmpty {
@@ -274,6 +283,11 @@ private struct KidPanel: View {
 
         return ClosureCollapse.collapse(reminders + eventItems)
     }
+
+    /// Only ever true for this one kid on this one day. The other panel is
+    /// resolved separately, because one school being shut says nothing about
+    /// the other.
+    private var isClosed: Bool { ClosureCollapse.containsClosure(lines) }
 
     private func eventLabel(_ event: SchoolEventRecord) -> String {
         guard !event.isAllDay else { return event.title }

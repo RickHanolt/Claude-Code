@@ -143,6 +143,14 @@ enum ClosureCollapse {
         return start.lowerBound..<end.upperBound
     }
 
+    /// Whether this day is a closure for this kid.
+    ///
+    /// Uses the same detection as the collapse, follower guard included, so a
+    /// half day mentioning buses can't switch the rest of the panel off.
+    static func containsClosure(_ items: [MorningItem]) -> Bool {
+        items.contains { isClosure($0.matchText) }
+    }
+
     /// Collapses every closure in one kid's day into a single line.
     ///
     /// Left alone when there is only one. A lone "No School - Professional
