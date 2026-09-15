@@ -76,8 +76,6 @@ struct MorningModeView: View {
                     )
                 } else {
                     VStack(spacing: 0) {
-                        WeatherStrip()
-
                         // A paging TabView rather than a swipe gesture: it
                         // tracks the finger, rubber-bands at the ends, and
                         // behaves the way every other iOS page does, none of
@@ -133,6 +131,18 @@ struct MorningModeView: View {
     /// One day's panels.
     @ViewBuilder
     private func dayView(for day: Date) -> some View {
+        // The weather belongs to the day, so it rides inside the page rather
+        // than sitting fixed above it. Above the pager it would have shown
+        // today's rain over tomorrow's plan.
+        VStack(spacing: 0) {
+            WeatherStripView(day: day)
+            Divider()
+            kidPanels(for: day)
+        }
+    }
+
+    @ViewBuilder
+    private func kidPanels(for day: Date) -> some View {
         // Equal division rather than a scroll: the point is a glance, and a
         // screen you have to scroll to finish reading is a screen you'll skip
         // on a school morning. Past two kids that stops being possible, so it
@@ -182,28 +192,6 @@ struct MorningModeView: View {
     }
 }
 
-/// Placeholder until WeatherKit is enabled in the developer portal.
-///
-/// Kept in the layout rather than left out, so adding the real forecast is a
-/// change to this view's body instead of a re-think of the split below it —
-/// and so the space it needs is accounted for now rather than discovered later.
-private struct WeatherStrip: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "cloud.sun")
-                .foregroundStyle(.secondary)
-            Text("Weather not set up yet")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.3))
-    }
-}
-
-/// One kid's half of the screen.
 private struct KidPanel: View {
     let kid: KidRecord
     let plan: DayPlan

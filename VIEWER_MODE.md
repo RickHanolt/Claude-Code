@@ -129,3 +129,38 @@ than no edit at all because it looks like it worked.
 *Stop following this schedule* wipes the local store as well as the credentials.
 A phone that has left must not keep showing a family's schedule with no way left
 to update or correct it.
+
+## Reports
+
+The one thing a viewer can send. `ReportIssueView` (viewer) writes a
+`HouseholdReport` — free text, plus an optional kid and day — seals it with the
+household key and posts it to `/v1/viewer/reports`. `ReportsListView` (owner)
+lists them, decrypts them, and acknowledges one at a time.
+
+Three decisions worth keeping:
+
+- **The context is attached, not typed.** "Teddy · Thursday" comes from two taps
+  rather than from the reporter remembering to say so. It's the difference
+  between a report you can act on and a text saying "the app is wrong".
+- **Reports carry the snapshot version they were written against**, and the
+  owner's phone records what it last published. When those differ the list says
+  so, because half of "this is wrong" turns out to be "this is old" and the two
+  need completely different answers.
+- **Acknowledging is explicit.** A report read on the way into a meeting and
+  auto-cleared is exactly the one that needed to stay in the list. The reporter
+  is not notified either way — this is a note, and the composer says so, so
+  nobody assumes it pages a phone at 6am.
+
+One unreadable report (a viewer left holding an old key) is counted and skipped
+rather than allowed to hide the readable ones around it.
+
+## Weather
+
+The town is typed once by the owner and travels in the snapshot, so every phone
+shows the weather where the kids are rather than where that phone is. It is an
+optional field and deliberately not a format bump: an older viewer ignores it,
+a newer viewer meeting an older snapshot gets nil and shows no weather.
+
+A viewer applying a snapshot adopts the town; an owner does not. An owner's town
+is their own setting, and an owner applying their own snapshot — which happens
+the first time anyone tests the round trip — must not be able to overwrite it.

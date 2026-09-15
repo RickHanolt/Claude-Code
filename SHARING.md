@@ -108,8 +108,9 @@ there isn't one. Worth having before other people's data is in there.
 
 ## Polish — noticeable but not dangerous
 
-- **Weather is stubbed.** Needs the WeatherKit capability in the Apple Developer
-  portal and Apple's attribution in the UI.
+- **Weather comes from Open-Meteo**, not WeatherKit — no API key, no
+  entitlement, no Apple Developer portal step. Free for personal use; if this
+  ever became a real product that licence is the first thing to re-read.
 - **Morning Mode splits evenly for two kids and scrolls past that.** Untested
   with three.
 - **`BlockWord` shrinks to fit but has no floor.** A very long name would render

@@ -24,6 +24,12 @@ struct HouseholdSnapshot: Codable, Sendable {
     var exceptions: [Exception]
     var events: [SchoolEventDTO]
 
+    /// Optional, and deliberately not a format bump: an older viewer decoding a
+    /// newer snapshot ignores the key, and a newer viewer decoding an older one
+    /// gets nil and simply shows no weather. Neither is a failure, so neither
+    /// should be treated as one.
+    var place: WeatherPlace?
+
     struct Kid: Codable, Sendable {
         var id: UUID
         var name: String

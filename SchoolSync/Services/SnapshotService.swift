@@ -70,7 +70,11 @@ struct SnapshotService {
                     schoolID: $0.schoolID,
                     source: $0.source
                 )
-            }
+            },
+            // Travels with the schedule so a viewing phone shows the weather
+            // where the kids are, not where that phone is. It's the difference
+            // between "coat" meaning something and meaning nothing.
+            place: WeatherSettings.place
         )
     }
 
@@ -87,7 +91,11 @@ struct SnapshotService {
                 try buildSnapshot(),
                 with: ViewerSettings.householdKeyCreatingIfNeeded()
             )
-            try await client.publish(payload: payload)
+            let receipt = try await client.publish(payload: payload)
+            // Recorded so the Reports screen can say how far behind a reporter
+            // was. Without it every report reads as current, including the ones
+            // that are only wrong because the phone hadn't updated.
+            ViewerSettings.publishedVersion = receipt.version
         } catch {
             // Publishing is a side effect of syncing, not the point of it. A
             // failure here must not make the owner's own sync look broken —
@@ -147,6 +155,14 @@ struct SnapshotService {
         }
         for event in snapshot.events {
             modelContext.insert(SchoolEventRecord(dto: event))
+        }
+
+        // Only on a viewing phone. An owner's town is their own setting and a
+        // snapshot they publish must never be able to overwrite it — which it
+        // could, since an owner applying their own snapshot is a thing that
+        // happens the moment anyone tests the round trip.
+        if ViewerSettings.role == .viewer, snapshot.place != WeatherSettings.place {
+            WeatherSettings.place = snapshot.place
         }
 
         try modelContext.save()

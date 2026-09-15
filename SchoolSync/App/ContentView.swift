@@ -113,6 +113,11 @@ struct ContentView: View {
             await snapshots.publishIfNeeded(hasViewers: ViewerSettings.hasViewers)
         }
 
+        // After either branch, because a viewer's town arrives with the
+        // snapshot and fetching a forecast before it lands would fetch one for
+        // the wrong place — or for nowhere at all on the very first sync.
+        await WeatherService.refreshIfNeeded()
+
         AutoSync.markRun()
     }
 }

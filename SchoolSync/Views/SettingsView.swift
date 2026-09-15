@@ -92,8 +92,14 @@ struct SettingsView: View {
                     NavigationLink { DayExceptionsView() } label: {
                         Label("Day changes", systemImage: "calendar.badge.exclamationmark")
                     }
+                    NavigationLink { WeatherPlaceView() } label: {
+                        Label("Weather", systemImage: "cloud.sun")
+                    }
                     NavigationLink { ViewersListView() } label: {
                         Label("Sharing", systemImage: "person.2.badge.key")
+                    }
+                    NavigationLink { ReportsListView() } label: {
+                        Label("Reports", systemImage: "exclamationmark.bubble")
                     }
                 }
 

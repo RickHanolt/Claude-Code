@@ -128,6 +128,23 @@ enum ViewerSettings {
         interval == 0 ? nil : Date(timeIntervalSince1970: interval)
     }
 
+    private static let publishedVersionKey = "viewer.publishedVersion"
+
+    /// The version this phone last published, as the server numbered it.
+    ///
+    /// The owner-side mirror of `snapshotVersion`, which is what a viewer last
+    /// received. Kept as its own key rather than sharing one: a field whose
+    /// meaning flips with the role is a field that gets read in the wrong role
+    /// exactly once, and here that would mean silently comparing a number
+    /// against itself and reporting everyone as up to date.
+    static var publishedVersion: Int? {
+        get {
+            let stored = UserDefaults.standard.integer(forKey: publishedVersionKey)
+            return stored == 0 ? nil : stored
+        }
+        set { UserDefaults.standard.set(newValue ?? 0, forKey: publishedVersionKey) }
+    }
+
     // MARK: - First run
 
     /// Whether anyone has told this install which kind of phone it is.

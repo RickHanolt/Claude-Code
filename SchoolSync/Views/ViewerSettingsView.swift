@@ -50,6 +50,14 @@ struct ViewerSettingsView: View {
                     Text("Updates arrive when whoever set this up opens their own copy of the app. This phone shows what they last sent, and checks again each time you open it.")
                 }
 
+                Section {
+                    NavigationLink { ReportIssueView() } label: {
+                        Label("Something looks wrong", systemImage: "exclamationmark.bubble")
+                    }
+                } footer: {
+                    Text("Sends a note to whoever set this up. They see it next time they open their app.")
+                }
+
                 Section("Appearance") {
                     Picker("Theme", selection: $appearanceRaw) {
                         ForEach(AppearanceSetting.allCases) { option in
