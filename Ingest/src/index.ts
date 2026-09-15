@@ -4,6 +4,18 @@ import { randomToken, sha256Hex } from "./auth";
 import { collapseDuplicates, contentFingerprint, isDuplicateEvent, type ExistingEvent } from "./dedupe";
 import { selectAttachment, type StoredAttachment } from "./attachments";
 import { DEFAULT_TIMEZONE } from "./timezone";
+import {
+  authenticateViewer,
+  handleAckReports,
+  handleCreateInvite,
+  handleCreateReport,
+  handleGetSnapshot,
+  handleListReports,
+  handleListViewers,
+  handlePublishSnapshot,
+  handleRedeemInvite,
+  handleRevokeViewer,
+} from "./viewers";
 
 export interface Env {
   DB: D1Database;
@@ -481,6 +493,60 @@ export default {
     if (url.pathname === "/v1/ack" && request.method === "POST") {
       return handleAck(request, env);
     }
+
+    // --- Viewer mode (see VIEWER_MODE.md) ------------------------------------
+    //
+    // Redemption is the one unauthenticated route: the invite code IS the
+    // credential, and it is burned on use.
+    if (url.pathname === "/v1/viewers/redeem" && request.method === "POST") {
+      return handleRedeemInvite(request, env);
+    }
+
+    // A viewer may fetch the snapshot and file a report. That is the entire
+    // list, and it is enforced here rather than by which buttons the app draws.
+    //
+    // Everything else in this router authenticates against households.api_key_hash,
+    // which a viewer token can never match — so the refusal is structural, not a
+    // check somebody has to remember to write on each new endpoint.
+    if (url.pathname === "/v1/viewer/snapshot" && request.method === "GET") {
+      const viewer = await authenticateViewer(request, env);
+      if (!viewer) return json({ error: "unauthorized" }, 401);
+      return handleGetSnapshot(env, viewer.householdId);
+    }
+    if (url.pathname === "/v1/viewer/reports" && request.method === "POST") {
+      const viewer = await authenticateViewer(request, env);
+      if (!viewer) return json({ error: "unauthorized" }, 401);
+      return handleCreateReport(request, env, viewer);
+    }
+
+    // Owner-only from here: publishing, inviting, revoking, reading reports.
+    if (url.pathname.startsWith("/v1/viewers") || url.pathname === "/v1/snapshot" || url.pathname === "/v1/reports") {
+      const household = await authenticateHousehold(request, env);
+      if (!household) return json({ error: "unauthorized" }, 401);
+
+      if (url.pathname === "/v1/snapshot" && request.method === "POST") {
+        return handlePublishSnapshot(request, env, household.id);
+      }
+      if (url.pathname === "/v1/snapshot" && request.method === "GET") {
+        return handleGetSnapshot(env, household.id);
+      }
+      if (url.pathname === "/v1/viewers/invite" && request.method === "POST") {
+        return handleCreateInvite(env, household.id);
+      }
+      if (url.pathname === "/v1/viewers" && request.method === "GET") {
+        return handleListViewers(env, household.id);
+      }
+      if (url.pathname === "/v1/viewers/revoke" && request.method === "POST") {
+        return handleRevokeViewer(request, env, household.id);
+      }
+      if (url.pathname === "/v1/reports" && request.method === "GET") {
+        return handleListReports(env, household.id);
+      }
+      if (url.pathname === "/v1/reports/ack" && request.method === "POST") {
+        return handleAckReports(request, env, household.id);
+      }
+    }
+
     return json({ error: "not found" }, 404);
   },
 
