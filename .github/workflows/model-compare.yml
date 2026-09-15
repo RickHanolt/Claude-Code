@@ -1,0 +1,75 @@
+# Compares extraction models against real stored emails.
+#
+# Manual only. This workflow SPENDS MONEY on the Anthropic API — a few dollars
+# at most, bounded by max_cost — so it never runs on push.
+#
+# It lives here rather than as a local script because the credentials it needs
+# already live here: ANTHROPIC_API_KEY and the Cloudflare token are repository
+# secrets, and running it this way means neither ever has to move.
+name: Model Comparison
+
+on:
+  workflow_dispatch:
+    inputs:
+      emails:
+        description: "How many recent emails that produced events to test"
+        required: true
+        default: "4"
+      max_cost:
+        description: "Stop once spend reaches this many dollars"
+        required: true
+        default: "3.00"
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Ingest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+
+      # Emails that actually produced events, newest first. Anything that
+      # extracted to nothing tells us nothing about a model's ceiling.
+      - name: Pull emails from D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx wrangler d1 execute schoolsync_ingest --remote --json --command \
+            "SELECT f.id, f.subject, f.body_text AS bodyText, f.received_at AS receivedAt,
+                    f.remote_image_urls AS remoteImageURLs
+             FROM forwarded_emails f
+             WHERE (SELECT count(*) FROM candidate_events c
+                      WHERE c.forwarded_email_id = f.id) > 0
+             ORDER BY f.received_at DESC
+             LIMIT ${{ inputs.emails }};" > emails.json
+
+      - name: Pull their attachments
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx wrangler d1 execute schoolsync_ingest --remote --json --command \
+            "SELECT a.forwarded_email_id, a.filename, a.media_type AS mediaType, a.data
+             FROM email_attachments a
+             JOIN forwarded_emails f ON f.id = a.forwarded_email_id
+             WHERE (SELECT count(*) FROM candidate_events c
+                      WHERE c.forwarded_email_id = f.id) > 0
+             ORDER BY f.received_at DESC;" > attachments.json
+
+      - name: Compare
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npx tsx scripts/model-compare.ts --max-cost=${{ inputs.max_cost }}
+
+      # Deleted rather than left for the runner to clean up. These files hold
+      # the full text of other people's school mail, and an uploaded artifact
+      # would outlive the run by ninety days.
+      - name: Remove the email dump
+        if: always()
+        run: rm -f emails.json attachments.json

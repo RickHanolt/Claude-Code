@@ -269,14 +269,41 @@ function formatInstant(instant: Date): string {
  * with no dates) from "we never got an answer", and only the latter should
  * leave the email queued for another attempt.
  */
+/** Which model runs an extraction, and how it's configured.
+ *
+ * Parameterised only so the model-comparison harness can hold everything else
+ * constant while varying this. Production passes nothing and gets the default
+ * below; no caller in the mail path chooses a model. */
+export interface ExtractionModel {
+  model: string;
+  /** Omit to send no `thinking` parameter at all, which is not the same as
+   * sending `disabled` — Haiku 4.5 expects the older
+   * `{type: "enabled", budget_tokens: N}` form and may reject `disabled`.
+   *
+   * Adaptive thinking and `output_config.effort` are deliberately absent: the
+   * pinned SDK (0.70.1) has no types for either, and a model comparison should
+   * vary one thing. Revisit both together with an SDK upgrade. */
+  thinking?: { type: "disabled" };
+}
+
+export const PRODUCTION_MODEL: ExtractionModel = {
+  model: "claude-opus-5",
+  thinking: { type: "disabled" },
+};
+
 export async function extractEvents(
   apiKey: string,
   subject: string,
   bodyText: string,
   receivedAt: Date = new Date(),
   attachments: StoredAttachment[] = [],
-  timeZone: string = DEFAULT_TIMEZONE
-): Promise<{ events: ExtractedEvent[]; exceptions: ExtractedException[] }> {
+  timeZone: string = DEFAULT_TIMEZONE,
+  config: ExtractionModel = PRODUCTION_MODEL
+): Promise<{
+  events: ExtractedEvent[];
+  exceptions: ExtractedException[];
+  usage: { inputTokens: number; outputTokens: number };
+}> {
   // maxRetries is explicit because the SDK's default of 2 sits *inside* an
   // outer retry: a failed extraction releases the row back to pending and a
   // later pass tries it again. Left at the default, one consistently bad email
@@ -291,9 +318,12 @@ export async function extractEvents(
   ];
 
   const message = await client.beta.messages.parse({
-    model: "claude-opus-5",
+    model: config.model,
     max_tokens: attachments.length > 0 ? MAX_TOKENS_WITH_ATTACHMENTS : MAX_TOKENS_TEXT_ONLY,
-    thinking: { type: "disabled" },
+    // Spread rather than passed as undefined: Haiku 4.5 takes neither the
+    // adaptive thinking form nor `effort`, and sending either as an explicit
+    // undefined is not the same as omitting the key.
+    ...(config.thinking ? { thinking: config.thinking } : {}),
     messages: [{ role: "user", content }],
     output_format: betaZodOutputFormat(Extraction),
   });
@@ -302,9 +332,15 @@ export async function extractEvents(
   // rather than estimate. The absence of this number is why a 60x overrun was
   // only visible on the billing page.
   console.log(
-    `Extraction usage: input=${message.usage.input_tokens} output=${message.usage.output_tokens} ` +
-      `stop=${message.stop_reason} attachments=${attachments.length} subject="${subject.slice(0, 60)}"`
+    `Extraction usage: model=${config.model} input=${message.usage.input_tokens} ` +
+      `output=${message.usage.output_tokens} stop=${message.stop_reason} ` +
+      `attachments=${attachments.length} subject="${subject.slice(0, 60)}"`
   );
+
+  const usage = {
+    inputTokens: message.usage.input_tokens,
+    outputTokens: message.usage.output_tokens,
+  };
 
   // `parsed_output` is null when the response didn't satisfy the schema.
   // Treating that as a failure (not an empty result) keeps the email queued
@@ -338,5 +374,5 @@ export async function extractEvents(
     return valid;
   });
 
-  return { events: normalized, exceptions };
+  return { events: normalized, exceptions, usage };
 }
