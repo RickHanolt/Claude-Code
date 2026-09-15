@@ -96,7 +96,13 @@ enum ViewerSettings {
     // MARK: - What a viewer is currently showing
 
     private static let snapshotVersionKey = "viewer.snapshotVersion"
-    private static let snapshotPublishedAtKey = "viewer.snapshotPublishedAt"
+
+    /// Stored as a plain interval, and the key is public, so screens can watch
+    /// it with `@AppStorage` and redraw the moment a refresh lands. Read once
+    /// into `@State` instead and the "updated X ago" line freezes at whatever
+    /// it said when the screen first appeared — which is precisely the lie the
+    /// line exists to prevent.
+    static let snapshotPublishedAtKey = "viewer.snapshotPublishedAt"
 
     /// Recorded so a report can name exactly which version its author was
     /// looking at, and so the screen can say how old that version is.
@@ -112,16 +118,44 @@ enum ViewerSettings {
     /// whenever the owner's phone hasn't been opened, which is exactly the case
     /// a viewer needs to be warned about.
     static var snapshotPublishedAt: Date? {
-        get { UserDefaults.standard.object(forKey: snapshotPublishedAtKey) as? Date }
-        set { UserDefaults.standard.set(newValue, forKey: snapshotPublishedAtKey) }
+        get { date(fromStoredInterval: UserDefaults.standard.double(forKey: snapshotPublishedAtKey)) }
+        set { UserDefaults.standard.set(newValue?.timeIntervalSince1970 ?? 0, forKey: snapshotPublishedAtKey) }
     }
 
+    /// Zero means "never published" rather than 1970 — the sentinel a
+    /// `@AppStorage(Double)` default gives us for free.
+    static func date(fromStoredInterval interval: Double) -> Date? {
+        interval == 0 ? nil : Date(timeIntervalSince1970: interval)
+    }
+
+    // MARK: - First run
+
+    /// Whether anyone has told this install which kind of phone it is.
+    ///
+    /// Separate from `role` because an owner is `.unconfigured` right up until
+    /// they've entered backend credentials, and most owners never will — the
+    /// app works perfectly well on its own. So `role` can't answer "is this a
+    /// fresh install?", and asking someone who has been using the app for weeks
+    /// whether they'd like to set it up would be alarming.
+    static let hasChosenRoleKey = "viewer.hasChosenRole"
+
+    static var hasChosenRole: Bool {
+        get { UserDefaults.standard.bool(forKey: hasChosenRoleKey) }
+        set { UserDefaults.standard.set(newValue, forKey: hasChosenRoleKey) }
+    }
+
+    /// Forgets every credential this phone held as a viewer.
+    ///
+    /// The store it was mirroring is wiped separately, by the caller, because
+    /// leaving without clearing it would leave a phone showing a household's
+    /// schedule forever with no way left to update or correct it.
     static func leaveHousehold() {
         snapshotVersion = nil
         snapshotPublishedAt = nil
         viewerToken = nil
         viewerBaseURL = nil
         householdKey = nil
+        hasChosenRole = false
     }
 }
 

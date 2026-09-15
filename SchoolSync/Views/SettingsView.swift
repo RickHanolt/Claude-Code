@@ -17,6 +17,7 @@ struct SettingsView: View {
     @AppStorage(AutoAcceptSetting.storageKey, store: AppGroup.sharedDefaults)
     private var autoAcceptRoutedMail = true
 
+    @Query private var allKids: [KidRecord]
     @Query private var allEvents: [SchoolEventRecord]
     @Query private var allExceptions: [DayException]
     @Query private var allRoutes: [SenderRoute]
@@ -90,6 +91,24 @@ struct SettingsView: View {
                     }
                     NavigationLink { DayExceptionsView() } label: {
                         Label("Day changes", systemImage: "calendar.badge.exclamationmark")
+                    }
+                    NavigationLink { ViewersListView() } label: {
+                        Label("Sharing", systemImage: "person.2.badge.key")
+                    }
+                }
+
+                // Makes the welcome screen's "you can change this later" true,
+                // and only while it still is. Joining replaces this phone's
+                // store with someone else's, so once there are kids or a
+                // backend here the offer disappears rather than becoming a way
+                // to delete a set-up household in two taps.
+                if allKids.isEmpty && !IngestSettings.isConfigured {
+                    Section {
+                        NavigationLink { JoinHouseholdView() } label: {
+                            Label("Join with a code", systemImage: "qrcode.viewfinder")
+                        }
+                    } footer: {
+                        Text("If someone shared their family's schedule with you, this phone can follow theirs instead of keeping its own.")
                     }
                 }
 

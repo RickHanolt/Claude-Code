@@ -95,3 +95,37 @@ defence is to never let the screen look more current than it is.
 - **No push notifications.** Reports appear when the owner next opens the app.
   Real push means APNs certificates and a notification service; worth adding if
   the delay proves to matter, not before.
+
+## The screens
+
+| Screen | Who sees it | What it does |
+|---|---|---|
+| `WelcomeView` | A blank install only | *Set this up* vs *Join with a code*. Never shown to an install that already has kids, backend credentials or a viewer token. |
+| `JoinHouseholdView` | Joining phone | Names the phone, scans the QR (or takes a pasted code), redeems it, and fetches the first snapshot immediately. |
+| `ViewersListView` | Owner, under Settings → Sharing | Creates an invite, shows the QR, lists joined phones with last-seen, revokes by swipe. |
+| `ViewerSettingsView` | Viewer | Freshness line, *Check for updates*, theme, *Stop following this schedule*. |
+
+Viewer mode is carried down the view tree as `\.isViewer` (see `ViewerMode.swift`)
+rather than read from `ViewerSettings` inside each screen — a body that reads a
+global keeps whatever it saw first, and six independent checks eventually
+disagree with each other.
+
+What that flag turns off: adding a kid from Morning Mode, opening `EditEventView`
+from the Calendar, and the swipe-to-delete on an event. All three would let a
+viewer make a change that the next snapshot silently reverses, which is worse
+than no edit at all because it looks like it worked.
+
+## Two things a viewer does not get
+
+- **Events in the iOS Calendar app.** A viewer's rows live in the app only.
+  Writing a household's schedule into a grandparent's own calendar is a bigger
+  claim on their phone than following a schedule implies.
+- **The school feed URLs.** Stripped when a snapshot is applied. A viewer that
+  could fetch a feed itself would immediately drift from the snapshot it exists
+  to mirror.
+
+## Leaving
+
+*Stop following this schedule* wipes the local store as well as the credentials.
+A phone that has left must not keep showing a family's schedule with no way left
+to update or correct it.

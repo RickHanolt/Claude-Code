@@ -55,6 +55,7 @@ private struct DayBlockLabel: View {
 
 struct CalendarView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.isViewer) private var isViewer
     @Query(filter: #Predicate<SchoolEventRecord> { !$0.isDeletedByUser }, sort: \SchoolEventRecord.startDate)
     private var events: [SchoolEventRecord]
     @Query(sort: \KidRecord.name) private var kids: [KidRecord]
@@ -115,15 +116,23 @@ struct CalendarView: View {
             Group {
                 if kids.isEmpty {
                     ContentUnavailableView(
-                        "Add a kid to get started",
-                        systemImage: "person.badge.plus",
-                        description: Text("Head to the Kids tab, then add each kid's school.")
+                        isViewer ? "Nothing sent yet" : "Add a kid to get started",
+                        systemImage: isViewer ? "clock.arrow.circlepath" : "person.badge.plus",
+                        description: Text(
+                            isViewer
+                                ? "The schedule arrives the next time whoever shared it opens their app."
+                                : "Head to the Kids tab, then add each kid's school."
+                        )
                     )
                 } else if upcomingByDay.isEmpty {
                     ContentUnavailableView(
                         "No upcoming events yet",
                         systemImage: "calendar.badge.exclamationmark",
-                        description: Text("Add a school with an ICS feed or scrape config, then tap Sync.")
+                        description: Text(
+                            isViewer
+                                ? "Nothing is coming up in what was last sent to this phone."
+                                : "Add a school with an ICS feed or scrape config, then tap Sync."
+                        )
                     )
                 } else {
                     List {
@@ -139,11 +148,7 @@ struct CalendarView: View {
                                 }
 
                                 ForEach(Array(section.events.enumerated()), id: \.element.externalID) { index, event in
-                                    NavigationLink {
-                                        EditEventView(event: event, kid: kidsByID[event.kidID])
-                                    } label: {
-                                        dayRow(day: section.day, event: event, isFirstOfDay: index == 0)
-                                    }
+                                    eventLink(day: section.day, event: event, isFirstOfDay: index == 0)
                                     // A hairline above the first row of each
                                     // day is the only divider: it separates
                                     // days without drawing a line between
@@ -152,10 +157,16 @@ struct CalendarView: View {
                                     .listRowSeparator(.hidden, edges: .bottom)
                                     .listRowInsets(EdgeInsets(top: 5, leading: 12, bottom: 5, trailing: 12))
                                     .swipeActions(edge: .trailing) {
-                                        Button(role: .destructive) {
-                                            delete(event)
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
+                                        // Nothing to swipe on a viewing phone:
+                                        // a delete here would vanish on the
+                                        // next update and never reach the
+                                        // person who can actually fix it.
+                                        if !isViewer {
+                                            Button(role: .destructive) {
+                                                delete(event)
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
                                         }
                                     }
                                 }
@@ -191,6 +202,24 @@ struct CalendarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.yellow.opacity(0.2))
                 }
+            }
+        }
+    }
+
+    /// Tappable for an owner, inert for a viewer.
+    ///
+    /// A viewer opening `EditEventView` would be offered Save on a row that the
+    /// next snapshot silently overwrites — the worst kind of edit, because it
+    /// looks like it worked.
+    @ViewBuilder
+    private func eventLink(day: Date, event: SchoolEventRecord, isFirstOfDay: Bool) -> some View {
+        if isViewer {
+            dayRow(day: day, event: event, isFirstOfDay: isFirstOfDay)
+        } else {
+            NavigationLink {
+                EditEventView(event: event, kid: kidsByID[event.kidID])
+            } label: {
+                dayRow(day: day, event: event, isFirstOfDay: isFirstOfDay)
             }
         }
     }
@@ -297,6 +326,22 @@ struct CalendarView: View {
     private func sync() async {
         isSyncing = true
         defer { isSyncing = false }
+
+        // Same button, different meaning. For a viewer there are no feeds to
+        // fetch and no mail to poll — "sync" means "ask whether anything new
+        // was sent", which is the only thing this phone can do.
+        if isViewer {
+            do {
+                try await SnapshotService(modelContext: modelContext)
+                    .refreshFromSnapshot(calendarSync: CalendarSyncService())
+                lastSyncResult = nil
+            } catch {
+                lastSyncResult = SyncResult(errors: [error.localizedDescription])
+            }
+            AutoSync.markRun()
+            return
+        }
+
         let coordinator = SyncCoordinator(modelContext: modelContext, calendarSyncService: CalendarSyncService())
         lastSyncResult = await coordinator.runFullSync()
     }

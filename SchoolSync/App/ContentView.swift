@@ -17,23 +17,37 @@ struct ContentView: View {
     @AppStorage(AppearanceSetting.storageKey, store: AppGroup.sharedDefaults)
     private var appearanceRaw = AppearanceSetting.system.rawValue
 
+    /// Watched rather than read once, because every transition into and out of
+    /// viewer mode writes it — so this is what swaps the whole app over the
+    /// moment someone joins a household or leaves one.
+    @AppStorage(ViewerSettings.hasChosenRoleKey) private var hasChosenRole = false
+
+    @Query private var kids: [KidRecord]
+
     @State private var isAutoSyncing = false
 
+    /// Only a genuinely blank install gets asked. An app with kids in it has
+    /// already answered, and so has one with backend credentials or a viewer
+    /// token — asking either of them to choose would be alarming and wrong.
+    private var needsWelcome: Bool {
+        !hasChosenRole && kids.isEmpty && ViewerSettings.role == .unconfigured
+    }
+
+    private var isViewer: Bool { ViewerSettings.role == .viewer }
+
     var body: some View {
-        TabView {
-            MorningModeView()
-                .tabItem { Label("Morning", systemImage: "sun.horizon") }
-
-            CalendarView()
-                .tabItem { Label("Calendar", systemImage: "calendar") }
-
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape") }
+        Group {
+            if needsWelcome {
+                WelcomeView()
+            } else {
+                tabs
+            }
         }
         // Applied here rather than per-screen: preferredColorScheme propagates
         // up to the window, so one modifier at the root also covers every
         // sheet and pushed view beneath it.
         .preferredColorScheme(AppearanceSetting.resolve(appearanceRaw).colorScheme)
+        .environment(\.isViewer, isViewer)
         .task { await autoSyncIfNeeded() }
         .onChange(of: scenePhase) { _, phase in
             // Returning to the app after it's been away is the moment its
@@ -41,6 +55,26 @@ struct ContentView: View {
             // about to read them.
             guard phase == .active else { return }
             Task { await autoSyncIfNeeded() }
+        }
+    }
+
+    private var tabs: some View {
+        TabView {
+            MorningModeView()
+                .tabItem { Label("Morning", systemImage: "sun.horizon") }
+
+            CalendarView()
+                .tabItem { Label("Calendar", systemImage: "calendar") }
+
+            // Two different screens, not one with rows hidden — see
+            // ViewerSettingsView for why.
+            if isViewer {
+                ViewerSettingsView()
+                    .tabItem { Label("Settings", systemImage: "gearshape") }
+            } else {
+                SettingsView()
+                    .tabItem { Label("Settings", systemImage: "gearshape") }
+            }
         }
     }
 

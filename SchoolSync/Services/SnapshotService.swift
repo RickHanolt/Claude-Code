@@ -108,24 +108,7 @@ struct SnapshotService {
             throw HouseholdCrypto.Failure.cannotDecrypt
         }
 
-        for event in try modelContext.fetch(FetchDescriptor<SchoolEventRecord>()) {
-            if let identifier = event.calendarSyncIdentifier {
-                try? calendarSync.delete(eventIdentifier: identifier)
-            }
-            modelContext.delete(event)
-        }
-        for exception in try modelContext.fetch(FetchDescriptor<DayException>()) {
-            modelContext.delete(exception)
-        }
-        for defaults in try modelContext.fetch(FetchDescriptor<KidDayDefaults>()) {
-            modelContext.delete(defaults)
-        }
-        for school in try modelContext.fetch(FetchDescriptor<SchoolRecord>()) {
-            modelContext.delete(school)
-        }
-        for kid in try modelContext.fetch(FetchDescriptor<KidRecord>()) {
-            modelContext.delete(kid)
-        }
+        try wipe(calendarSync: calendarSync)
 
         for kid in snapshot.kids {
             modelContext.insert(KidRecord(id: kid.id, name: kid.name, colorHex: kid.colorHex))
@@ -166,6 +149,35 @@ struct SnapshotService {
             modelContext.insert(SchoolEventRecord(dto: event))
         }
 
+        try modelContext.save()
+    }
+
+    /// Removes everything a snapshot owns, here and in the iOS calendar.
+    ///
+    /// Used both to make room for a newer snapshot and to clean up when a
+    /// viewer leaves a household. The second case is why it's a method rather
+    /// than the top of `apply`: a phone that has left must not keep showing a
+    /// family's schedule, and by then there is no new snapshot to replace it
+    /// with.
+    func wipe(calendarSync: CalendarSyncService) throws {
+        for event in try modelContext.fetch(FetchDescriptor<SchoolEventRecord>()) {
+            if let identifier = event.calendarSyncIdentifier {
+                try? calendarSync.delete(eventIdentifier: identifier)
+            }
+            modelContext.delete(event)
+        }
+        for exception in try modelContext.fetch(FetchDescriptor<DayException>()) {
+            modelContext.delete(exception)
+        }
+        for defaults in try modelContext.fetch(FetchDescriptor<KidDayDefaults>()) {
+            modelContext.delete(defaults)
+        }
+        for school in try modelContext.fetch(FetchDescriptor<SchoolRecord>()) {
+            modelContext.delete(school)
+        }
+        for kid in try modelContext.fetch(FetchDescriptor<KidRecord>()) {
+            modelContext.delete(kid)
+        }
         try modelContext.save()
     }
 

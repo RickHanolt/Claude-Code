@@ -55,11 +55,17 @@ targets:
           - UIInterfaceOrientationPortrait
         NSCalendarsFullAccessUsageDescription: "SchoolSync writes each kid's school events into a dedicated calendar so you can see everything alongside your other calendars."
         NSCalendarsUsageDescription: "SchoolSync writes each kid's school events into a dedicated calendar so you can see everything alongside your other calendars."
-        # The app implements no encryption itself — only standard HTTPS via
-        # URLSession (OS-provided TLS) for fetching ICS feeds/scraping school
-        # pages, and SHA256 for non-secret dedup hashing, not confidentiality.
-        # That's Apple's "exempt" category; declaring it here skips the
-        # export-compliance question on every future TestFlight upload.
+        # Required before AVCaptureDevice will hand over the camera at all —
+        # without it the app doesn't get a permission prompt, it terminates.
+        # Only ever used to scan a join code.
+        NSCameraUsageDescription: "SchoolSync uses the camera once, to scan the code that connects this phone to your family's schedule."
+        # The app implements no encryption of its own. What it uses is all
+        # provided by the OS: HTTPS via URLSession for feeds and the backend,
+        # SHA256 for non-secret dedup hashing, and CryptoKit's AES-GCM to seal
+        # the household snapshot that viewer mode uploads. Apple's exemption
+        # covers encryption provided by the operating system, so this stays
+        # false and the export-compliance question stays skipped on every
+        # TestFlight upload. Worth re-reading if we ever ship our own crypto.
         ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: SchoolSync/SchoolSync.entitlements

@@ -9,6 +9,7 @@ import SwiftData
 /// weight and a coloured marker. If every line shouted, the jeans day would look
 /// exactly like the uniform day and the screen would be worth nothing at 7am.
 struct MorningModeView: View {
+    @Environment(\.isViewer) private var isViewer
     @Query(sort: \KidRecord.name) private var kids: [KidRecord]
     @Query private var dayDefaults: [KidDayDefaults]
     @Query private var exceptions: [DayException]
@@ -16,6 +17,12 @@ struct MorningModeView: View {
     private var events: [SchoolEventRecord]
 
     @State private var isPresentingAddKid = false
+
+    /// Watched, not sampled — so the line below moves when a refresh lands
+    /// rather than showing whatever it read when the tab first appeared.
+    @AppStorage(ViewerSettings.snapshotPublishedAtKey) private var publishedAtRaw = 0.0
+
+    private var publishedAt: Date? { ViewerSettings.date(fromStoredInterval: publishedAtRaw) }
 
     /// Days either side of today that can be swiped to.
     ///
@@ -59,9 +66,13 @@ struct MorningModeView: View {
             Group {
                 if kids.isEmpty {
                     ContentUnavailableView(
-                        "Add a kid to get started",
-                        systemImage: "sun.horizon",
-                        description: Text("Morning Mode shows what each kid needs today. Add a kid, then set up their normal day.")
+                        isViewer ? "Nothing sent yet" : "Add a kid to get started",
+                        systemImage: isViewer ? "clock.arrow.circlepath" : "sun.horizon",
+                        description: Text(
+                            isViewer
+                                ? "The schedule arrives the next time whoever shared it opens their app. Settings has a button to check again now."
+                                : "Morning Mode shows what each kid needs today. Add a kid, then set up their normal day."
+                        )
                     )
                 } else {
                     VStack(spacing: 0) {
@@ -93,10 +104,29 @@ struct MorningModeView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button { isPresentingAddKid = true } label: { Image(systemName: "plus") }
+                    if !isViewer {
+                        Button { isPresentingAddKid = true } label: { Image(systemName: "plus") }
+                    }
                 }
             }
             .sheet(isPresented: $isPresentingAddKid) { AddKidView() }
+            // Always on, not only when it's old.
+            //
+            // This screen is designed so that a normal day is quiet, which
+            // means a phone that stopped receiving updates looks exactly like a
+            // week with nothing unusual in it. On a viewing phone that
+            // resemblance is the whole risk, so the age of what's on screen is
+            // part of what's on screen.
+            .safeAreaInset(edge: .bottom) {
+                if isViewer {
+                    Text(SnapshotFreshness.describe(publishedAt))
+                        .font(.caption2)
+                        .foregroundStyle(SnapshotFreshness.isStale(publishedAt) ? Color.orange : Color.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(.bar)
+                }
+            }
         }
     }
 
