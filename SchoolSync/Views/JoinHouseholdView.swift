@@ -117,10 +117,10 @@ struct JoinHouseholdView: View {
         // spending it on an invite whose key is unreadable would leave this
         // phone joined to a household it can't read and needing a second code
         // for no reason the person holding it could possibly guess.
-        let key: SymmetricKey
-        do {
-            key = try HouseholdCrypto.decode(invite.key)
-        } catch {
+        //
+        // `guard let try?` rather than do/catch, because a catch block binds its
+        // own `error` and silently shadows the @State of the same name.
+        guard let key = try? HouseholdCrypto.decode(invite.key) else {
             error = "That code is incomplete. Ask them to make a new one."
             return
         }
@@ -138,7 +138,7 @@ struct JoinHouseholdView: View {
 
             // Fetch straight away. Waiting for the next launch would show an
             // empty app to someone who has just done everything right.
-            try? await SnapshotService(modelContext: modelContext)
+            _ = try? await SnapshotService(modelContext: modelContext)
                 .refreshFromSnapshot(calendarSync: CalendarSyncService())
             AutoSync.markRun()
 
