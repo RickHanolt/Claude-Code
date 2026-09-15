@@ -303,8 +303,23 @@ private struct KidPanel: View {
         // Events always read as notable — an event on the calendar is by
         // definition not part of an ordinary day. Matched on the bare title, so
         // a timed event's "3:30 PM · " prefix can't confuse the detection.
-        let eventItems = events.map {
-            MorningItem(text: eventLabel($0), isNotable: true, matchText: $0.title)
+        let eventItems = events.map { event in
+            MorningItem(
+                text: eventLabel(event),
+                // The notes carry the half of an event that decides what a
+                // parent actually has to do. SMA's calendar gives Oct 9 the
+                // title "Grandparent Day" and hides "11:00 AM dismissal, no
+                // aftercare" underneath it — the title is trivia, the note is
+                // whether somebody is outside the school at the right time.
+                //
+                // Extraction had been storing this correctly all along and
+                // nothing rendered it, so the most actionable fact of that
+                // morning was captured, assigned to the right kid, and
+                // invisible on the one screen built to surface it.
+                detail: event.notes?.trimmedNonEmpty,
+                isNotable: true,
+                matchText: event.title
+            )
         }
 
         return ClosureCollapse.collapse(reminders + eventItems)

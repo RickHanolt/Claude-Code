@@ -12,6 +12,17 @@ extension String {
         return digest.map { String(format: "%02x", $0) }.prefix(24).description
     }
 
+    /// The trimmed string, or nil when nothing is left of it.
+    ///
+    /// Optional-returning so a field that is present but blank reads the same
+    /// as a field that is absent. A UI handed an empty string renders an empty
+    /// line, and an empty line is something the reader has to stop and
+    /// interpret.
+    var trimmedNonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// Very small HTML-tag stripper for share-extension text extraction,
     /// where we just need readable text to run a date detector over — not a
     /// full HTML parser (that's SwiftSoup's job for scraping).
