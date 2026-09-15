@@ -90,7 +90,8 @@ struct ReportIssueView: View {
             kidName: kids.first { $0.id == kidID }?.name,
             day: includeDay ? Calendar.current.startOfDay(for: day) : nil,
             createdAt: .now,
-            snapshotVersion: ViewerSettings.snapshotVersion
+            snapshotVersion: ViewerSettings.snapshotVersion,
+            contentVersion: ViewerSettings.receivedContentVersion
         )
 
         do {

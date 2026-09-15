@@ -24,6 +24,17 @@ struct HouseholdSnapshot: Codable, Sendable {
     var exceptions: [Exception]
     var events: [SchoolEventDTO]
 
+    /// Counts *changes*, not publishes.
+    ///
+    /// The server's own version increments every time a snapshot is uploaded,
+    /// and the owner's phone uploads one on every launch whether or not
+    /// anything moved. That makes it useless for answering "has this changed
+    /// since you looked?" — which is the only question anyone asks of it.
+    ///
+    /// This is bumped only when the content differs from the last publish, so a
+    /// gap of one genuinely means one real change.
+    var contentVersion: Int?
+
     /// Optional, and deliberately not a format bump: an older viewer decoding a
     /// newer snapshot ignores the key, and a newer viewer decoding an older one
     /// gets nil and simply shows no weather. Neither is a failure, so neither

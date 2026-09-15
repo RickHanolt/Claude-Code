@@ -142,10 +142,15 @@ Three decisions worth keeping:
 - **The context is attached, not typed.** "Teddy · Thursday" comes from two taps
   rather than from the reporter remembering to say so. It's the difference
   between a report you can act on and a text saying "the app is wrong".
-- **Reports carry the snapshot version they were written against**, and the
-  owner's phone records what it last published. When those differ the list says
-  so, because half of "this is wrong" turns out to be "this is old" and the two
-  need completely different answers.
+- **Reports say whether the schedule moved since they were written.** The
+  measure is a *content* version, not the server's publish counter: the owner's
+  phone republishes on every launch, so the counter increments on its own, and
+  opening the app to read a report was itself enough to make its author look one
+  update behind. The content version bumps only when a digest of the snapshot —
+  publish time excluded, every array sorted — actually differs. A gap of one now
+  means one real change, and the line says the report may already be fixed.
+  Snapshots are still published on quiet days, because the timestamp is a
+  heartbeat and a viewer needs to know the owner's phone is still in touch.
 - **Acknowledging is explicit.** A report read on the way into a meeting and
   auto-cleared is exactly the one that needed to stay in the list. The reporter
   is not notified either way — this is a note, and the composer says so, so

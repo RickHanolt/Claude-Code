@@ -145,6 +145,31 @@ enum ViewerSettings {
         set { UserDefaults.standard.set(newValue ?? 0, forKey: publishedVersionKey) }
     }
 
+    private static let publishedContentVersionKey = "viewer.publishedContentVersion"
+    private static let contentDigestKey = "viewer.contentDigest"
+    private static let receivedContentVersionKey = "viewer.receivedContentVersion"
+
+    /// Owner side: how many times the schedule has actually changed, and the
+    /// fingerprint of what was last published so the next publish can tell.
+    static var publishedContentVersion: Int {
+        get { UserDefaults.standard.integer(forKey: publishedContentVersionKey) }
+        set { UserDefaults.standard.set(newValue, forKey: publishedContentVersionKey) }
+    }
+
+    static var contentDigest: String? {
+        get { UserDefaults.standard.string(forKey: contentDigestKey) }
+        set { UserDefaults.standard.set(newValue, forKey: contentDigestKey) }
+    }
+
+    /// Viewer side: the content version of the snapshot this phone is showing.
+    static var receivedContentVersion: Int? {
+        get {
+            let stored = UserDefaults.standard.integer(forKey: receivedContentVersionKey)
+            return stored == 0 ? nil : stored
+        }
+        set { UserDefaults.standard.set(newValue ?? 0, forKey: receivedContentVersionKey) }
+    }
+
     // MARK: - First run
 
     /// Whether anyone has told this install which kind of phone it is.
@@ -169,6 +194,7 @@ enum ViewerSettings {
     static func leaveHousehold() {
         snapshotVersion = nil
         snapshotPublishedAt = nil
+        receivedContentVersion = nil
         viewerToken = nil
         viewerBaseURL = nil
         householdKey = nil

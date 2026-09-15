@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import CryptoKit
 
 /// Turns the owner's store into a snapshot, and a snapshot into a viewer's
 /// store.
@@ -32,11 +33,18 @@ struct SnapshotService {
             FetchDescriptor<SchoolEventRecord>(predicate: #Predicate { !$0.isDeletedByUser })
         )
 
+        // Sorted before mapping, every array of them. A SwiftData fetch makes
+        // no promise about order, and an unstable order would make the content
+        // digest below differ on every run — which would report the schedule as
+        // having changed each launch, the exact false alarm this is here to
+        // stop.
         return HouseholdSnapshot(
             publishedAt: .now,
-            kids: kids.map { .init(id: $0.id, name: $0.name, colorHex: $0.colorHex) },
-            schools: schools.map { .init(id: $0.id, name: $0.name, kidID: $0.kidID) },
-            defaults: defaults.map {
+            kids: kids.sorted { $0.id.uuidString < $1.id.uuidString }
+                .map { .init(id: $0.id, name: $0.name, colorHex: $0.colorHex) },
+            schools: schools.sorted { $0.id.uuidString < $1.id.uuidString }
+                .map { .init(id: $0.id, name: $0.name, kidID: $0.kidID) },
+            defaults: defaults.sorted { $0.kidID.uuidString < $1.kidID.uuidString }.map {
                 .init(
                     kidID: $0.kidID,
                     breakfast: $0.breakfast,
@@ -45,7 +53,7 @@ struct SnapshotService {
                     standingReminder: $0.standingReminder
                 )
             },
-            exceptions: exceptions.map {
+            exceptions: exceptions.sorted { $0.id < $1.id }.map {
                 .init(
                     id: $0.id,
                     kidID: $0.kidID,
@@ -57,7 +65,7 @@ struct SnapshotService {
                     isNotable: $0.isNotable
                 )
             },
-            events: events.map {
+            events: events.sorted { $0.externalID < $1.externalID }.map {
                 SchoolEventDTO(
                     id: $0.externalID,
                     title: $0.title,
@@ -87,14 +95,26 @@ struct SnapshotService {
         guard hasViewers, let client = ViewerClient.owner() else { return }
 
         do {
+            var snapshot = try buildSnapshot()
+
+            // Published every time regardless, because the timestamp is a
+            // heartbeat: a viewer needs to know this phone is still in touch,
+            // and skipping quiet days would show them an orange "stale" line
+            // through a perfectly normal week.
+            //
+            // What is *not* bumped every time is the content version.
+            let digest = Self.digest(of: snapshot)
+            if digest != ViewerSettings.contentDigest {
+                ViewerSettings.publishedContentVersion += 1
+                ViewerSettings.contentDigest = digest
+            }
+            snapshot.contentVersion = ViewerSettings.publishedContentVersion
+
             let payload = try HouseholdCrypto.seal(
-                try buildSnapshot(),
+                snapshot,
                 with: ViewerSettings.householdKeyCreatingIfNeeded()
             )
             let receipt = try await client.publish(payload: payload)
-            // Recorded so the Reports screen can say how far behind a reporter
-            // was. Without it every report reads as current, including the ones
-            // that are only wrong because the phone hadn't updated.
             ViewerSettings.publishedVersion = receipt.version
         } catch {
             // Publishing is a side effect of syncing, not the point of it. A
@@ -102,6 +122,24 @@ struct SnapshotService {
             // the next sync republishes, and viewers show how stale they are.
             print("Snapshot publish failed: \(error.localizedDescription)")
         }
+    }
+
+    /// A fingerprint of what the snapshot *says*, ignoring when it was said.
+    ///
+    /// `publishedAt` is zeroed and `contentVersion` cleared before hashing, or
+    /// every snapshot would differ from the last by definition and the count
+    /// would be back to counting publishes.
+    static func digest(of snapshot: HouseholdSnapshot) -> String {
+        var canonical = snapshot
+        canonical.publishedAt = Date(timeIntervalSince1970: 0)
+        canonical.contentVersion = nil
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+
+        guard let data = try? encoder.encode(canonical) else { return UUID().uuidString }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - Receiving
@@ -218,6 +256,7 @@ struct SnapshotService {
 
         ViewerSettings.snapshotVersion = stored.version
         ViewerSettings.snapshotPublishedAt = stored.publishedAt
+        ViewerSettings.receivedContentVersion = snapshot.contentVersion
         return true
     }
 }

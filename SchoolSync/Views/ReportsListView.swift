@@ -93,15 +93,24 @@ struct ReportsListView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    /// How far behind the reporter's phone was when they wrote it.
+    /// Whether the schedule has actually moved since they wrote this.
+    ///
+    /// Counts changes, not publishes. The earlier version of this line compared
+    /// server version numbers, which increment on every launch — so opening the
+    /// app to *read* a report was itself enough to make its author look one
+    /// behind. The number was right and the sentence was false.
+    ///
+    /// Silent when nothing has changed, which is the common case and not worth
+    /// a line.
     private func stalenessLine(_ item: DecryptedReport) -> String? {
-        guard let theirs = item.report.snapshotVersion,
-              let published = ViewerSettings.publishedVersion,
-              published > theirs
-        else { return nil }
+        guard let theirs = item.report.contentVersion else { return nil }
 
-        let behind = published - theirs
-        return "They were \(behind) update\(behind == 1 ? "" : "s") behind when they sent this."
+        let behind = ViewerSettings.publishedContentVersion - theirs
+        guard behind > 0 else { return nil }
+
+        return behind == 1
+            ? "The schedule has changed once since they sent this — it may already be fixed."
+            : "The schedule has changed \(behind) times since they sent this — it may already be fixed."
     }
 
     private func load() async {

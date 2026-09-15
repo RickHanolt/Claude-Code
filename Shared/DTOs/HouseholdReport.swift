@@ -20,5 +20,11 @@ struct HouseholdReport: Codable, Sendable {
     /// Which snapshot the reporter was looking at. Recorded because half of
     /// "this is wrong" turns out to be "this is old", and those need different
     /// answers.
+    ///
+    /// `snapshotVersion` counts publishes and is kept only for diagnostics —
+    /// it inflates on its own, because the owner's phone republishes on every
+    /// launch. `contentVersion` counts real changes and is the one the Reports
+    /// screen reads.
     var snapshotVersion: Int?
+    var contentVersion: Int?
 }
