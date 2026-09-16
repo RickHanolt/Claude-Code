@@ -12,6 +12,7 @@ struct SchoolSyncApp: App {
             KidDayDefaults.self,
             DayException.self,
             SenderRoute.self,
+            MutedActivity.self,
         ])
         let configuration = ModelConfiguration(schema: schema, url: AppGroup.sharedModelStoreURL)
         do {

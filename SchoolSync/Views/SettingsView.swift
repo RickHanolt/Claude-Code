@@ -116,6 +116,9 @@ struct SettingsView: View {
                     NavigationLink { DayExceptionsView() } label: {
                         Label("Day changes", systemImage: "calendar.badge.exclamationmark")
                     }
+                    NavigationLink { HiddenActivitiesView() } label: {
+                        Label("Hidden activities", systemImage: "bell.slash")
+                    }
                     NavigationLink { WeatherPlaceView() } label: {
                         Label("Weather", systemImage: "cloud.sun")
                     }

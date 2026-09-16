@@ -18,7 +18,23 @@ struct EventStore {
     @discardableResult
     func upsert(_ dtos: [SchoolEventDTO]) throws -> Int {
         var changed = 0
+
+        // Fetched once rather than per row: this runs over a whole sync, and a
+        // household has a handful of these at most.
+        let mutes = (try? modelContext.fetch(FetchDescriptor<MutedActivity>())) ?? []
+
         for dto in dtos {
+            // Checked before anything is stored, not after. A muted activity
+            // that lands in the store and is filtered on the way out is an
+            // activity that reaches the calendar app, the notification, and the
+            // published snapshot before anyone decides it shouldn't have.
+            //
+            // Applies to new rows only. An existing row is left to the
+            // tombstone that the mute set on it, so un-muting later is a
+            // question about rows that still exist rather than an archaeology
+            // problem.
+            if ActivityMute.isMuted(title: dto.title, kidID: dto.kidID, in: mutes) { continue }
+
             let externalID = dto.id
             let descriptor = FetchDescriptor<SchoolEventRecord>(
                 predicate: #Predicate { $0.externalID == externalID }

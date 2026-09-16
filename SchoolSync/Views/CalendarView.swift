@@ -64,6 +64,15 @@ struct CalendarView: View {
     @State private var isSyncing = false
     @State private var lastSyncResult: SyncResult?
 
+    /// Confirmed rather than immediate, unlike Delete.
+    ///
+    /// Delete removes one row a parent is looking at. This removes every
+    /// session of an activity, including ones scrolled off screen and ones that
+    /// haven't arrived yet, so the count goes in the prompt — "Hide all 16?" is
+    /// a different question from "Hide this?", and only one of them is the one
+    /// being asked.
+    @State private var pendingMute: PendingMute?
+
     /// Width reserved for the day marker. Three 19pt blocks plus their gaps
     /// come to 61pt, so this is the block strip plus a little breathing room —
     /// tight on purpose, because every point here is taken from the event
@@ -167,6 +176,23 @@ struct CalendarView: View {
                                             } label: {
                                                 Label("Delete", systemImage: "trash")
                                             }
+
+                                            // Named after the kid rather than
+                                            // labelled "Mute", because the
+                                            // decision is about a person. An
+                                            // event belongs to exactly one kid,
+                                            // so there is never a list to pick
+                                            // from — and muting cross country
+                                            // for one child must not quietly
+                                            // mute it for the other.
+                                            if let kid = kidsByID[event.kidID] {
+                                                Button {
+                                                    pendingMute = PendingMute(event: event, kid: kid)
+                                                } label: {
+                                                    Label("Not for \(kid.name)", systemImage: "bell.slash")
+                                                }
+                                                .tint(.orange)
+                                            }
                                         }
                                     }
                                 }
@@ -177,6 +203,25 @@ struct CalendarView: View {
                 }
             }
             .navigationTitle("Calendar")
+            .confirmationDialog(
+                pendingMute.map { "Hide \($0.event.title) for \($0.kid.name)?" } ?? "",
+                isPresented: Binding(get: { pendingMute != nil }, set: { if !$0 { pendingMute = nil } }),
+                titleVisibility: .visible
+            ) {
+                if let pendingMute {
+                    let count = sessions(matching: pendingMute.event).count
+                    Button("Hide \(count) session\(count == 1 ? "" : "s")", role: .destructive) {
+                        mute(pendingMute)
+                        self.pendingMute = nil
+                    }
+                }
+                Button("Cancel", role: .cancel) { pendingMute = nil }
+            } message: {
+                if let pendingMute {
+                    Text("Future sessions won't be added either. Undo this in Settings under Hidden activities.")
+                        .accessibilityLabel("Future sessions of \(pendingMute.event.title) will not be added for \(pendingMute.kid.name).")
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -314,6 +359,41 @@ struct CalendarView: View {
     /// it to EventKit) and tombstones the local record so a future sync
     /// from the same source doesn't bring it back — see
     /// `SchoolEventRecord.isDeletedByUser`.
+    /// Every upcoming session of one activity, for one kid.
+    ///
+    /// Matched on the folded title, exactly — see `MutedActivity.matchKey`. The
+    /// parent is about to be told how many rows this covers, so the set it
+    /// counts has to be the set it removes.
+    private func sessions(matching event: SchoolEventRecord) -> [SchoolEventRecord] {
+        let key = MutedActivity.matchKey(for: event.title)
+        return events.filter {
+            $0.kidID == event.kidID && MutedActivity.matchKey(for: $0.title) == key
+        }
+    }
+
+    /// Hides an activity and remembers the decision.
+    ///
+    /// Two halves, and both are needed. Tombstoning clears what is already
+    /// stored; the MutedActivity row is what stops next month's newsletter
+    /// putting the same sixteen sessions back. Either alone leaves the parent
+    /// doing this again in four weeks.
+    private func mute(_ pending: PendingMute) {
+        for session in sessions(matching: pending.event) {
+            delete(session)
+        }
+
+        let muted = MutedActivity(kidID: pending.kid.id, title: pending.event.title)
+        // Insert-or-leave: the id folds case and punctuation, so muting the
+        // same activity twice is the same row, and SwiftData would otherwise
+        // trip its own uniqueness constraint on a second swipe.
+        let existing = (try? modelContext.fetch(FetchDescriptor<MutedActivity>())) ?? []
+        if !existing.contains(where: { $0.id == muted.id }) {
+            modelContext.insert(muted)
+        }
+
+        try? modelContext.save()
+    }
+
     private func delete(_ event: SchoolEventRecord) {
         if let identifier = event.calendarSyncIdentifier {
             try? CalendarSyncService().delete(eventIdentifier: identifier)
@@ -345,4 +425,16 @@ struct CalendarView: View {
         let coordinator = SyncCoordinator(modelContext: modelContext, calendarSyncService: CalendarSyncService())
         lastSyncResult = await coordinator.runFullSync()
     }
+}
+
+/// One pending "not for this kid" decision, held while the parent confirms it.
+///
+/// Carries the kid as well as the event so the prompt can name them, rather
+/// than looking the name up again at render time and having to answer what to
+/// show if it has gone.
+struct PendingMute: Identifiable {
+    let event: SchoolEventRecord
+    let kid: KidRecord
+
+    var id: String { "\(event.externalID):\(kid.id.uuidString)" }
 }
