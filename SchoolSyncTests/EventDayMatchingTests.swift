@@ -21,6 +21,10 @@ final class EventDayMatchingTests: XCTestCase {
         EventDayMatching.occurs(on: target, start: start, end: end, calendar: calendar)
     }
 
+    private func isFirstDay(_ target: Date, from start: Date) -> Bool {
+        EventDayMatching.isFirstDay(on: target, start: start, calendar: calendar)
+    }
+
     /// Teddy's, exactly as stored: Monday through Friday.
     func testSpringVacationShowsOnEveryDayOfTheWeek() {
         let start = day(2027, 3, 22)
@@ -87,6 +91,45 @@ final class EventDayMatchingTests: XCTestCase {
 
         XCTAssertTrue(occurs(start, from: start, to: end))
         XCTAssertFalse(occurs(day(2027, 3, 21), from: start, to: end))
+    }
+
+    // MARK: - News on the first day, context afterwards
+
+    /// The regression that came with rendering spans on every day they cover.
+    ///
+    /// Hispanic Heritage Month runs mid-September to mid-October. Emphasising
+    /// every event on every day it spans put that line in alert weight on
+    /// thirty consecutive mornings, which spends the one signal the screen has
+    /// on something that changed once, a month ago.
+    func testALongObservanceIsNewsOnlyOnItsFirstDay() {
+        let start = day(2026, 9, 15)
+
+        XCTAssertTrue(isFirstDay(start, from: start), "the day it starts is worth saying loudly")
+
+        for target in [day(2026, 9, 16), day(2026, 9, 17), day(2026, 10, 14)] {
+            XCTAssertFalse(isFirstDay(target, from: start), "every later morning is context, not news")
+        }
+    }
+
+    /// Closures are the exception the caller layers on top, and they have to
+    /// stay loud for the whole span — school being shut is acted on every
+    /// morning of it, not announced once.
+    func testAClosureStaysLoudEveryDayOfItsSpan() {
+        let start = day(2027, 3, 22)
+
+        for dayOfMonth in 23...26 {
+            let target = day(2027, 3, dayOfMonth)
+            XCTAssertFalse(isFirstDay(target, from: start), "precondition: not the first day")
+            XCTAssertTrue(
+                ClosureCollapse.isClosure("Spring Vacation — Schools Closed"),
+                "so the closure check is what has to keep it emphasised"
+            )
+        }
+    }
+
+    func testASingleDayEventIsAlwaysItsOwnFirstDay() {
+        let start = day(2026, 10, 21)
+        XCTAssertTrue(isFirstDay(start, from: start))
     }
 
     /// The rule this replaced, stated as a test so it can't come back: matching

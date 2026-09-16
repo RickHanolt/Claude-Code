@@ -310,9 +310,17 @@ private struct KidPanel: View {
             MorningItem(text: $0.value, isNotable: $0.isException)
         }
 
-        // Events always read as notable — an event on the calendar is by
-        // definition not part of an ordinary day. Matched on the bare title, so
-        // a timed event's "3:30 PM · " prefix can't confuse the detection.
+        // Emphasised on the day it starts, or on every day of a closure.
+        //
+        // "Events are always notable" held while an event only ever appeared on
+        // its start date. Once spans render on every day they cover, it stopped
+        // holding: Hispanic Heritage Month runs mid-September to mid-October and
+        // was shouting on all thirty mornings. A span is news once and context
+        // afterwards. A closure is the exception, because school being shut is
+        // something a parent acts on every morning of it.
+        //
+        // Matched on the bare title, so a timed event's "3:30 PM · " prefix
+        // can't confuse the detection.
         let eventItems = events.map { event in
             MorningItem(
                 text: eventLabel(event),
@@ -327,7 +335,8 @@ private struct KidPanel: View {
                 // morning was captured, assigned to the right kid, and
                 // invisible on the one screen built to surface it.
                 detail: event.notes?.trimmedNonEmpty,
-                isNotable: true,
+                isNotable: EventDayMatching.isFirstDay(on: plan.day, start: event.startDate)
+                    || ClosureCollapse.isClosure(event.title),
                 matchText: event.title
             )
         }

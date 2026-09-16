@@ -31,4 +31,17 @@ enum EventDayMatching {
 
         return target >= first && target <= last
     }
+
+    /// Whether this day is the one the event begins on.
+    ///
+    /// Separates news from context. A span is worth the parent's attention the
+    /// morning it starts; on the days after, it is background — still true,
+    /// still worth printing, but not worth competing with the thing that
+    /// changed today.
+    ///
+    /// The exception is a closure, which the caller adds: school being shut is
+    /// something you act on every morning of it, not an announcement made once.
+    static func isFirstDay(on day: Date, start: Date, calendar: Calendar = .current) -> Bool {
+        calendar.startOfDay(for: day) == calendar.startOfDay(for: start)
+    }
 }
